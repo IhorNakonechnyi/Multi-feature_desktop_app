@@ -64,3 +64,6 @@ compile_commands.json
 # spec-kit feature specs/plans describe internal spec & supplier-data structure
 # (confidential per project scope) — keep local only, never push to public GitHub
 specs/
+
+# Personal editor settings, not shared project config
+.vscode/
