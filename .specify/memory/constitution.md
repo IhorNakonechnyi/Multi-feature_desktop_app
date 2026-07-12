@@ -1,6 +1,6 @@
 # Project Constitution: Multi-feature_desktop_app
 
-**Version**: 1.0.0
+**Version**: 1.0.1
 **Ratified**: 2026-07-12
 **Last Amended**: 2026-07-12
 
@@ -25,6 +25,12 @@ actually learned from.
   non-obvious.
 - If Claude proposes an advanced technique, it should briefly explain what it
   does and why it's the right choice here.
+- **Named design patterns** (GoF or otherwise) MUST only be used where they
+  genuinely fit the situation, and MUST carry a one-line comment at their
+  point of use stating *why that pattern fits here* — not what the pattern
+  is. Don't force a pattern's name onto something that's fundamentally
+  simple (e.g. a plain lookup table doesn't need to be dressed up as an
+  "Adapter").
 
 ### Principle 2: Small, Working Steps
 **Rule**: Features MUST be built incrementally, with something runnable after
@@ -107,3 +113,10 @@ software.
   conflict with these principles.
 - If a principle starts getting in the way in practice, that's a signal to
   amend it — not to silently ignore it.
+
+### Amendment History
+- **1.0.1** (2026-07-12): Added the "patterns need a one-line rationale
+  comment" rule to Principle 1's Application list, agreed on while designing
+  `specs/001-pcb-supplier-workflow` (the confidential-parameter-matching
+  design specifically, to avoid mislabeling a plain lookup table as an
+  "Adapter pattern").
