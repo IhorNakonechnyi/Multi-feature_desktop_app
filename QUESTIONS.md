@@ -13,16 +13,16 @@ Working file for questions that come up while generating `tasks.md` / during imp
 - **Zip library**: design doc suggests libzip/KArchive/miniz; `plan.md`/`research.md` chose **QuaZip** (LGPL, dynamically linked) with reasoning already recorded. → Defaulting to: **QuaZip**.
 - **Quote PDF library**: design doc mentions Poppler, which is **GPL** — already flagged elsewhere as something to avoid. → Defaulting to: whatever Feature 2 settles on (`QPdfDocument`/PDFium), not Poppler.
 
-_(unanswered — reply here if any of these defaults should actually change)_
+**Answered (2026-07-12): no changes — all defaults above confirmed as final.**
 
 ## Q2 — Excellon hole-count bucket boundary
 
 Confirmed: single number, holes with diameter in (0mm, 3mm]. Is the upper bound **inclusive** (a hole at exactly 3.00mm counts) or **exclusive** (must be <3mm)?
 
-_(unanswered)_
+**Answered (2026-07-12): inclusive — a hole at exactly 3.00mm counts.**
 
 ## Q3 — Unmapped-parameter behavior scope
 
 Confirmed: unmapped supplier fields are silently ignored. Does the same "silently ignore" rule apply to an unmapped **spec** parameter (one in the spec PDF with no entry in the alias-mapping file), or should that case behave differently (e.g. block the recommendation, since a required parameter can't be matched against any supplier)?
 
-_(unanswered)_
+**Answered (2026-07-12): same rule — silently ignore.** An unmapped spec parameter is excluded from matching entirely (not checked against any supplier), same as an unmapped supplier field. It does not block the recommendation.
