@@ -54,3 +54,13 @@ compile_commands.json
 *creator.user*
 
 *_qmlcache.qrc
+
+# Agent credentials/tokens that coding-agent integrations (e.g. Copilot) may drop in .github
+.github/**/*.env
+.github/**/*credential*
+.github/**/*token*
+.github/**/*secret*
+
+# spec-kit feature specs/plans describe internal spec & supplier-data structure
+# (confidential per project scope) — keep local only, never push to public GitHub
+specs/
