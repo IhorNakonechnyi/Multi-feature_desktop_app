@@ -89,10 +89,16 @@ add_executable(PcbSupplierWorkflow
     src/archivecompare/archivetreedelegate.cpp
     src/archivecompare/archivepanel.h
     src/archivecompare/archivepanel.cpp
+    src/archivecompare/gerberdifftrigger.h
+    src/archivecompare/gerberdifftrigger.cpp
     src/supplieradvisor/supplieradvisorpage.h
     src/supplieradvisor/supplieradvisorpage.cpp
     src/gerber/gerberviewerpage.h
     src/gerber/gerberviewerpage.cpp
+    src/gerber/gerberfiletype.h
+    src/gerber/gerberfiletype.cpp
+    src/gerber/gerberdiffrenderer.h
+    src/gerber/gerberdiffrenderer.cpp
     src/quotecompare/quotecomparepage.h
     src/quotecompare/quotecomparepage.cpp
     resources/resources.qrc
