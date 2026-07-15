@@ -324,15 +324,17 @@ void TestGerberExpression::evaluatesNumericLiteral()
 
 void TestGerberExpression::evaluatesVariableSubstitution()
 {
-    const QHash<int, double> variables = {{1, 0.055}};
-    QVERIFY(qAbs(GerberExpression::evaluate("$1", variables) - 0.055) < 1e-9);
+    const QHash<int, double> variables = {{1, 0.5}};
+    QVERIFY(qAbs(GerberExpression::evaluate("$1", variables) - 0.5) < 1e-9);
 }
 
 void TestGerberExpression::evaluatesMultiplication()
 {
-    // The octagon macro's real expression: "1.08239X$1"
-    const QHash<int, double> variables = {{1, 0.055}};
-    QVERIFY(qAbs(GerberExpression::evaluate("1.08239X$1", variables) - (1.08239 * 0.055)) < 1e-9);
+    // Synthetic value shaped like a real macro's scaling expression (a
+    // constant multiplier applied to a $-substituted aperture modifier) -
+    // not copied from any real file's actual macro/modifier values.
+    const QHash<int, double> variables = {{1, 0.5}};
+    QVERIFY(qAbs(GerberExpression::evaluate("2.0X$1", variables) - (2.0 * 0.5)) < 1e-9);
 }
 
 void TestGerberExpression::evaluatesAdditionAndSubtraction()
@@ -369,7 +371,7 @@ Expected: FAIL — target/header don't exist yet.
 
 // Aperture macros can compute a primitive's parameters from a small
 // arithmetic expression over the macro's own variables ($1, $2, ...),
-// e.g. the octagon macro's "1.08239X$1" (Gerber uses 'x'/'X' for
+// e.g. a scaling expression like "2.0X$1" (Gerber uses 'x'/'X' for
 // multiply, since '*' already terminates statements). This evaluates one
 // such expression given whatever variable values are currently in scope.
 namespace GerberExpression {
@@ -591,13 +593,13 @@ void TestGerberAperture::macroDelegatesToLookup()
 {
     GerberAperture aperture;
     aperture.shape = GerberAperture::Shape::Macro;
-    aperture.macroName = "OC8";
-    aperture.modifiers = {0.055};
+    aperture.macroName = "TESTMACRO";
+    aperture.modifiers = {0.5};
 
     bool lookupCalled = false;
     auto lookup = [&](const QString &name, const QVector<double> &params) {
         lookupCalled = true;
-        QCOMPARE(name, QString("OC8"));
+        QCOMPARE(name, QString("TESTMACRO"));
         QCOMPARE(params.size(), 1);
         QPainterPath path;
         path.addEllipse(QPointF(0, 0), 1, 1);
@@ -802,13 +804,15 @@ void TestGerberMacro::circlePrimitiveProducesExpectedBounds()
 
 void TestGerberMacro::polygonPrimitiveMatchesExpressionSubstitution()
 {
-    // This is the real octagon macro from the sample archive that
-    // motivated this whole design - primitive 5 (polygon), 8 vertices,
-    // diameter computed as 1.08239 * $1.
+    // Shaped like the real octagon macro that motivated this whole design
+    // (primitive 5/polygon, 8 vertices, diameter computed from a $-scaled
+    // expression), but with synthetic values, not the real sample's own
+    // macro name/modifier numbers - see the plan's confidentiality
+    // constraint (no real customer file content in the test suite).
     GerberMacro macro;
-    macro.statements = {"5,1,8,0,0,1.08239X$1,22.5"};
-    const QPainterPath path = GerberMacroBuilder::buildPath(macro, {0.055});
-    const double expectedDiameter = 1.08239 * 0.055;
+    macro.statements = {"5,1,8,0,0,2.0X$1,0"};
+    const QPainterPath path = GerberMacroBuilder::buildPath(macro, {0.5});
+    const double expectedDiameter = 2.0 * 0.5;
     const QRectF bounds = path.boundingRect();
     QVERIFY(qAbs(bounds.width() - expectedDiameter) < 0.001);
 }
@@ -917,7 +921,7 @@ namespace {
 
 // Splits a primitive statement's comma-separated fields and evaluates
 // each one as an expression (fields can be plain numbers, $-variables,
-// or arithmetic like the octagon macro's "1.08239X$1") - this is the one
+// or arithmetic like a scaling expression "2.0X$1") - this is the one
 // place macro fields turn from text into actual numbers.
 QVector<double> evaluateFields(const QStringList &fields, const QHash<int, double> &variables)
 {
@@ -1263,10 +1267,10 @@ void TestGerberParser::parsesMacroApertureFlash()
     const QString content =
         "%FSLAX24Y24*%\n"
         "%MOMM*%\n"
-        "%AMOC8*\n"
-        "5,1,8,0,0,1.08239X$1,22.5*\n"
+        "%AMTESTMACRO*\n"
+        "5,1,8,0,0,2.0X$1,0*\n"
         "%\n"
-        "%ADD11OC8,2.0*%\n"
+        "%ADD11TESTMACRO,2.0*%\n"
         "D11*\n"
         "X000000Y000000D03*\n";
 
@@ -1397,7 +1401,7 @@ GerberMacro lookupMacro(const ParserState &state, const QString &name)
 // wrapper by tokenize) into a GerberAperture, keyed by its code number.
 void parseApertureDefinition(const QString &statement, ParserState &state)
 {
-    // statement looks like "ADD10C,1.0" or "ADD11OC8,0.055"
+    // statement looks like "ADD10C,1.0" or "ADD11TESTMACRO,0.5"
     const QString body = statement.mid(2); // drop "AD"
     int codeEnd = 1; // codes are always a single letter 'D' followed by digits
     while (codeEnd < body.length() && body.at(codeEnd).isDigit()) {

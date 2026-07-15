@@ -13,7 +13,7 @@ A real sample archive (`Gerber_BT30-3b`, from `C:/Igor/Projects/Test_data/...` -
 
 - Straight-line traces only in the sample (no arcs), but **arc support (G02/G03) is being built for real** per explicit decision - other real jobs are expected to use curved traces even though this sample didn't.
 - Standard aperture shapes seen: Circle (`C`), Polygon (`P`, standard regular N-gon). Rectangle (`R`) and Obround (`O`) are the remaining two RS-274X standard shapes - not seen in this sample but trivial additions alongside Circle/Polygon (same aperture-definition mechanism), included for completeness.
-- One custom aperture macro (`%AMOC8*% 5,1,8,0,0,1.08239X$1,22.5*`) - regular-polygon primitive (code 5) with one variable substitution and one multiplication, used for octagon pads.
+- One custom aperture macro using the regular-polygon primitive (code 5) with one variable substitution and one multiplication (a scaling expression shaped like `2.0X$1`, not the real sample's own literal macro name/values), used for octagon pads.
 - `G04` comment lines present - skipped, not parsed as geometry.
 - Format/units vary **per file, not per convention**: some layers use legacy `G70` (inches) with `%FSLAX24Y24*%` (2.4 decimal format), one uses modern `%MOIN*%` with `%FSLAX25Y25*%` (2.5 format). Parser reads each file's own header rather than assuming a fixed format.
 - Only `%LPD*%` (dark polarity) seen - `%LPC*%` (clear/subtractive layer polarity) not observed but included since the compositing infrastructure built for macro exposure (below) covers it for free.
