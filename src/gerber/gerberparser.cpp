@@ -545,6 +545,18 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             }
             continue;
         }
+        if (text.startsWith(QLatin1String("G54")) || text.startsWith(QLatin1String("G55"))) {
+            // RS-274D legacy prefixes still emitted by real CAM tools
+            // (confirmed in a real supplier file, TARGET 3001! output):
+            // G54 = "select aperture", G55 = "prepare to flash". Neither
+            // changes any state of its own - the D-code that follows on
+            // the same statement carries the actual meaning - so strip
+            // the prefix and let the normal D-code handling below see the
+            // rest. Without this, "G54D41*" fell into the generic
+            // G-statement branch and was discarded whole, leaving every
+            // following flash on a zero-size default aperture.
+            text = text.mid(3);
+        }
         if (text.startsWith(QLatin1Char('G')) && !text.startsWith(QLatin1String("G70"))
             && !text.startsWith(QLatin1String("G71"))) {
             // G01/G02/G03 select the interpolation mode used by whichever

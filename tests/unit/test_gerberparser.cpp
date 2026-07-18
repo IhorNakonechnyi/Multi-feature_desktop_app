@@ -41,6 +41,7 @@ private slots:
     void stepAndRepeatMaterializesOneObjectPerGridCell();
     void arcStrokeObjectCarriesCenterAndDirection();
     void regionObjectCarriesAllVertices();
+    void g54ApertureSelectPrefixIsHonored();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -743,6 +744,30 @@ void TestGerberParser::regionObjectCarriesAllVertices()
         QCOMPARE(object.regionPoints.at(i).x, expected.at(i).first);
         QCOMPARE(object.regionPoints.at(i).y, expected.at(i).second);
     }
+}
+
+void TestGerberParser::g54ApertureSelectPrefixIsHonored()
+{
+    // "G54D41*" is RS-274D's legacy "select aperture" form - deprecated
+    // in RS-274X but still emitted by real CAM tools (found in a real
+    // supplier archive, TARGET 3001! output, where every aperture select
+    // in the file used it). The G54 prefix must be stripped and the
+    // D-code applied; dropping the whole statement leaves every flash on
+    // a zero-size default aperture, rendering the file as "no drawable
+    // content".
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD41C,2.0*%\n"
+        "G54D41*\n"
+        "X010000Y010000D03*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).type, ObjectType::Flash);
+    QCOMPARE(layer.objects.at(0).apertureCode, 41);
 }
 
 QTEST_MAIN(TestGerberParser)
