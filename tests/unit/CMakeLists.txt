@@ -66,6 +66,7 @@ add_test(NAME test_gerbermacro COMMAND test_gerbermacro)
 add_executable(test_gerberparser
     test_gerberparser.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectpaths.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberformat.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberaperture.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerbermacro.cpp

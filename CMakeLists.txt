@@ -108,6 +108,8 @@ add_executable(PcbSupplierWorkflow
     src/gerber/gerbermacro.h
     src/gerber/gerbermacro.cpp
     src/gerber/gerberobjectmodel.h
+    src/gerber/gerberobjectpaths.h
+    src/gerber/gerberobjectpaths.cpp
     src/gerber/gerberparser.h
     src/gerber/gerberparser.cpp
     src/quotecompare/quotecomparepage.h

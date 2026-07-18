@@ -6,7 +6,6 @@
 
 #include <QFile>
 #include <QHash>
-#include <QPainterPathStroker>
 #include <QPointF>
 #include <QPolygonF>
 #include <QTextStream>
@@ -14,6 +13,7 @@
 #include "gerberaperture.h"
 #include "gerberformat.h"
 #include "gerbermacro.h"
+#include "gerberobjectpaths.h"
 
 namespace {
 
@@ -141,11 +141,6 @@ struct ParserState {
 PointNm toNm(const QPointF &mm)
 {
     return PointNm{GerberFormat::mmToNm(mm.x()), GerberFormat::mmToNm(mm.y())};
-}
-
-QPointF toMm(const PointNm &nm)
-{
-    return QPointF{GerberFormat::nmToMm(nm.x), GerberFormat::nmToMm(nm.y)};
 }
 
 // Parses "%ADnnSHAPE,mod1,mod2,...*%" (already split from its '%...%'
@@ -408,116 +403,10 @@ void emitArcStroke(ParserState &state, const QPointF &from, const QPointF &to, c
 // Reconstruction: resolve the object model back to the legacy flattened path
 // ---------------------------------------------------------------------------
 //
-// These four resolve*Path functions rebuild exactly the geometry the parser
-// used to build inline (in flash()/drawLinearStroke()/drawArcStroke()/the G37
-// block, before this task moved geometry construction out of the parse). They
-// are pure: they take a GraphicObject's already-resolved millimeter fields and
-// the aperture/macro definitions, and return a QPainterPath - no ParserState,
-// no step-and-repeat (already materialized into separate objects at emit
-// time), no polarity grouping (the flatten loop's job). Coordinates arrive as
-// object-model nanometers and are converted back to mm here via toMm(); the
-// aperture modules still work in mm exactly as before, untouched.
-
-QPainterPath resolveFlashPath(const GerberAperture &aperture, const QPointF &positionMm, const Layer &layer,
-                              double unitScale)
-{
-    // Identical to the old flash(): build the aperture's flash geometry at the
-    // origin (resolving a macro aperture through the layer's macros, scaled by
-    // unitScale just as the inline flash() did), then translate to the flash
-    // point. layer.macros holds the same GerberMacro values the old
-    // lookupMacro() produced, so macro geometry is byte-identical.
-    QPainterPath flashPath = GerberApertureGeometry::buildFlashPath(
-        aperture, [&layer, unitScale](const QString &name, const QVector<double> &params) {
-            GerberMacro macro = layer.macros.value(name);
-            return GerberMacroBuilder::buildPath(macro, params, unitScale);
-        });
-    QTransform translate;
-    translate.translate(positionMm.x(), positionMm.y());
-    return translate.map(flashPath);
-}
-
-QPainterPath resolveLinearStrokePath(const GerberAperture &aperture, const QPointF &from, const QPointF &to)
-{
-    // A drawn line's "pen" is the current aperture's own shape - for the
-    // overwhelmingly common circular-aperture case, a stroke is just a
-    // capsule (rectangle plus two round end caps) between from/to, built
-    // the same way GerberMacro's Vector Line primitive builds one.
-    const double width = aperture.modifiers.value(0, 0.1);
-    QPainterPath stroke;
-    const double dx = to.x() - from.x();
-    const double dy = to.y() - from.y();
-    const double length = std::hypot(dx, dy);
-    const double angleDegrees = qRadiansToDegrees(std::atan2(dy, dx));
-    stroke.addRoundedRect(0, -width / 2.0, length, width, width / 2.0, width / 2.0);
-    QTransform transform;
-    transform.translate(from.x(), from.y());
-    transform.rotate(angleDegrees);
-    return transform.map(stroke);
-}
-
-// Draws a circular arc as a single stroked polyline approximating the
-// curve - the simplest correct way to render an arc without needing
-// QPainterPath's native arc primitives (which use a different angle
-// convention than Gerber's I/J center offsets). `counterClockwise` selects
-// which of the two arcs between `from` and `to` (going around `center`)
-// gets drawn; single- vs multi-quadrant mode (G74/G75) doesn't change this
-// - it only affects how a real Gerber writer chooses which arc to ask
-// for, not how one is drawn.
-//
-// This builds the whole arc as one polyline and strokes it in a single
-// QPainterPathStroker pass, rather than unioning many short capsule
-// segments: chaining dozens of near-collinear QPainterPath::united() calls
-// turned out to be numerically fragile in practice - the combined path's
-// winding computation could report `contains` as false for points well
-// inside the visibly-correct shape once enough thin, touching pieces were
-// combined. One stroke-and-unite avoids that.
-QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF &from, const QPointF &to,
-                                  const QPointF &center, bool counterClockwise)
-{
-    const double width = aperture.modifiers.value(0, 0.1);
-
-    const double startAngle = std::atan2(from.y() - center.y(), from.x() - center.x());
-    double endAngle = std::atan2(to.y() - center.y(), to.x() - center.x());
-    const double radius = std::hypot(from.x() - center.x(), from.y() - center.y());
-
-    if (counterClockwise && endAngle < startAngle) {
-        endAngle += 2.0 * std::numbers::pi;
-    } else if (!counterClockwise && endAngle > startAngle) {
-        endAngle -= 2.0 * std::numbers::pi;
-    }
-
-    constexpr int kSegments = 32; // fine enough to look smooth at any real board scale
-    QPainterPath centerline;
-    centerline.moveTo(from);
-    for (int i = 1; i <= kSegments; ++i) {
-        const double t = static_cast<double>(i) / kSegments;
-        const double angle = startAngle + (endAngle - startAngle) * t;
-        centerline.lineTo(center.x() + radius * std::cos(angle), center.y() + radius * std::sin(angle));
-    }
-
-    QPainterPathStroker stroker;
-    stroker.setWidth(width);
-    stroker.setCapStyle(Qt::RoundCap);
-    stroker.setJoinStyle(Qt::RoundJoin);
-    return stroker.createStroke(centerline);
-}
-
-QPainterPath resolveRegionPath(const QVector<PointNm> &regionPoints)
-{
-    // Same closed polygon the old G37 block built: the collected contour
-    // vertices, closed. The caller only emits a Region object when it has at
-    // least 3 vertices (matching the old size >= 3 guard), so no empty-region
-    // check is needed here.
-    QPolygonF polygon;
-    polygon.reserve(regionPoints.size());
-    for (const PointNm &vertex : regionPoints) {
-        polygon << toMm(vertex);
-    }
-    QPainterPath region;
-    region.addPolygon(polygon);
-    region.closeSubpath();
-    return region;
-}
+// Per-object geometry resolution (the old resolve*Path family) now lives in
+// GerberObjectPaths::objectPathMm - shared with the v2 mask renderer so both
+// consumers agree on what each object looks like. Only the polarity-grouped
+// boolean compositing below is still legacy-specific.
 
 // Reconstructs today's exact flattened QPainterPath from a Layer, so the
 // existing render pipeline is byte-for-byte unaffected by the object model
@@ -536,7 +425,7 @@ QPainterPath resolveRegionPath(const QVector<PointNm> &regionPoints)
 // away here (a union/subtract against an empty run is a no-op either way),
 // which is why this needs no explicit empty-group bookkeeping to match the old
 // output.
-QPainterPath flattenAndCompositeForLegacyRender(const Layer &layer, double unitScale)
+QPainterPath flattenAndCompositeForLegacyRender(const Layer &layer)
 {
     struct PolarityGroup {
         Polarity polarity;
@@ -554,27 +443,7 @@ QPainterPath flattenAndCompositeForLegacyRender(const Layer &layer, double unitS
             groups.append({object.polarity, QPainterPath{}});
             groups.last().path.setFillRule(Qt::WindingFill);
         }
-        QPainterPath shape;
-        switch (object.type) {
-        case ObjectType::Flash:
-            shape = resolveFlashPath(layer.apertures.value(object.apertureCode), toMm(object.position), layer,
-                                     unitScale);
-            break;
-        case ObjectType::Stroke:
-            if (object.isArc) {
-                shape = resolveArcStrokePath(layer.apertures.value(object.apertureCode), toMm(object.position),
-                                             toMm(object.strokeTo), toMm(object.arcCenter),
-                                             object.arcCounterClockwise);
-            } else {
-                shape = resolveLinearStrokePath(layer.apertures.value(object.apertureCode),
-                                                toMm(object.position), toMm(object.strokeTo));
-            }
-            break;
-        case ObjectType::Region:
-            shape = resolveRegionPath(object.regionPoints);
-            break;
-        }
-        groups.last().path.addPath(shape);
+        groups.last().path.addPath(GerberObjectPaths::objectPathMm(object, layer));
     }
 
     // Combine the (typically few) polarity groups in file order: each dark
@@ -838,9 +707,9 @@ Layer GerberParser::parseContentToObjects(const QString &content)
 
 QPainterPath GerberParser::parseContent(const QString &content)
 {
-    double unitScale = 1.0;
+    double unitScale = 1.0; // discarded - objectPathMm reads Layer::unitScale, set by the parse
     const Layer layer = parseContentToObjectsInternal(content, unitScale);
-    return flattenAndCompositeForLegacyRender(layer, unitScale);
+    return flattenAndCompositeForLegacyRender(layer);
 }
 
 QPainterPath GerberParser::parseFile(const QString &filePath)
