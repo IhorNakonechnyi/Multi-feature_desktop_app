@@ -99,6 +99,17 @@ add_executable(PcbSupplierWorkflow
     src/gerber/gerberfiletype.cpp
     src/gerber/gerberdiffrenderer.h
     src/gerber/gerberdiffrenderer.cpp
+    src/gerber/gerberformat.h
+    src/gerber/gerberformat.cpp
+    src/gerber/gerberexpression.h
+    src/gerber/gerberexpression.cpp
+    src/gerber/gerberaperture.h
+    src/gerber/gerberaperture.cpp
+    src/gerber/gerbermacro.h
+    src/gerber/gerbermacro.cpp
+    src/gerber/gerberobjectmodel.h
+    src/gerber/gerberparser.h
+    src/gerber/gerberparser.cpp
     src/quotecompare/quotecomparepage.h
     src/quotecompare/quotecomparepage.cpp
     resources/resources.qrc
