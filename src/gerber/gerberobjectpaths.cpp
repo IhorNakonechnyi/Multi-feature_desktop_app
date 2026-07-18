@@ -54,8 +54,13 @@ QPainterPath resolveLinearStrokePath(const GerberAperture &aperture, const QPoin
     return transform.map(stroke);
 }
 
-// Draws a circular arc as a single stroked polyline approximating the
-// curve. `counterClockwise` selects which of the two arcs between `from`
+// Draws a circular arc stroke following the TRUE curve (QPainterPath::
+// arcTo, which represents the circle as exact-to-subpixel bezier
+// segments) - not a chord polyline. The predecessor of this function
+// (GerberParser's old resolveArcStrokePath) used a fixed 32-segment
+// polyline; its chord sagitta grows with radius (~0.3mm at r=1000mm),
+// which is one of the "badly redrawn" defects the v2 design exists to
+// fix. `counterClockwise` selects which of the two arcs between `from`
 // and `to` (going around `center`) gets drawn.
 QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF &from, const QPointF &to,
                                   const QPointF &center, bool counterClockwise)
@@ -72,19 +77,28 @@ QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF 
         endAngle -= 2.0 * std::numbers::pi;
     }
 
-    constexpr int kSegments = 32; // fine enough to look smooth at any real board scale
+    // Angle-sign note: our coordinates are Gerber-native Y-up, where
+    // atan2 gives the mathematical angle (CCW positive). arcTo's angle
+    // convention is defined for Qt's Y-DOWN screen space - its point at
+    // angle t is (cx + r*cos t, cy - r*sin t). Negating both the start
+    // angle and the sweep maps one convention onto the other exactly
+    // (cos(-t) = cos t, -sin(-t) = sin t), so the drawn curve follows
+    // our mathematical arc without this file ever leaving Y-up space.
+    const QRectF circle(center.x() - radius, center.y() - radius, 2.0 * radius, 2.0 * radius);
     QPainterPath centerline;
     centerline.moveTo(from);
-    for (int i = 1; i <= kSegments; ++i) {
-        const double t = static_cast<double>(i) / kSegments;
-        const double angle = startAngle + (endAngle - startAngle) * t;
-        centerline.lineTo(center.x() + radius * std::cos(angle), center.y() + radius * std::sin(angle));
-    }
+    centerline.arcTo(circle, -qRadiansToDegrees(startAngle), -qRadiansToDegrees(endAngle - startAngle));
 
     QPainterPathStroker stroker;
     stroker.setWidth(width);
     stroker.setCapStyle(Qt::RoundCap);
     stroker.setJoinStyle(Qt::RoundJoin);
+    // The stroker's curve-approximation tolerance is in the path's own
+    // units - millimeters here, NOT pixels. Its 0.25 default would allow
+    // a quarter-millimeter deviation, quietly reintroducing the same
+    // class of error the polyline had. 0.001mm (1 micron) keeps the
+    // stroke outline exact at any realistic zoom.
+    stroker.setCurveThreshold(0.001);
     return stroker.createStroke(centerline);
 }
 
