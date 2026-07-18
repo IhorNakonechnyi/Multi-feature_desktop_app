@@ -143,6 +143,14 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
 void ArchiveComparePage::runComparison()
 {
+    // Cleared unconditionally, before either early return below: a re-pick
+    // that turns out empty or unreadable must not leave a previous pair's
+    // stale overlay/layers on screen describing an archive selection that's
+    // since changed.
+    shownLayerA_ = Layer{};
+    shownLayerB_ = Layer{};
+    gerberCanvas_->setComposite(QImage(), QRectF());
+
     const QString pathA = panelA_->archivePath();
     const QString pathB = panelB_->archivePath();
     if (pathA.isEmpty() || pathB.isEmpty()) {
@@ -186,9 +194,6 @@ void ArchiveComparePage::runComparison()
     }
     showButton_->setEnabled(false);
     pairStatusLabel_->clear();
-    shownLayerA_ = Layer{};
-    shownLayerB_ = Layer{};
-    gerberCanvas_->setComposite(QImage(), QRectF());
 
     const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
     const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
