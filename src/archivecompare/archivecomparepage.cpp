@@ -186,6 +186,9 @@ void ArchiveComparePage::runComparison()
     }
     showButton_->setEnabled(false);
     pairStatusLabel_->clear();
+    shownLayerA_ = Layer{};
+    shownLayerB_ = Layer{};
+    gerberCanvas_->setComposite(QImage(), QRectF());
 
     const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
     const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
@@ -267,6 +270,7 @@ void ArchiveComparePage::showSelectedPair()
 
     if (unitedBounds.isEmpty()) {
         pairStatusLabel_->setText(tr("Neither side has drawable Gerber content."));
+        gerberCanvas_->setComposite(QImage(), QRectF());
         return;
     }
     if (boundsA.isEmpty()) {
