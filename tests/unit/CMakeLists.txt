@@ -75,6 +75,19 @@ target_include_directories(test_gerberobjectpaths PRIVATE ${CMAKE_SOURCE_DIR}/sr
 target_link_libraries(test_gerberobjectpaths PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_gerberobjectpaths COMMAND test_gerberobjectpaths)
 
+add_executable(test_layermaskrenderer
+    test_layermaskrenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/layermaskrenderer.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectpaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberformat.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberaperture.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerbermacro.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberexpression.cpp
+)
+target_include_directories(test_layermaskrenderer PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_layermaskrenderer PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME test_layermaskrenderer COMMAND test_layermaskrenderer)
+
 add_executable(test_gerberparser
     test_gerberparser.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
