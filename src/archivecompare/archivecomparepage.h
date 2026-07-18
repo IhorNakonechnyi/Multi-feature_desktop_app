@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QRectF>
+#include <QVector>
 #include <QWidget>
 
 #include "../gerber/gerberobjectmodel.h"
@@ -14,14 +16,12 @@ class QWidget;
 
 // v1.0's feature page: two side-by-side ArchivePanels, re-compared
 // automatically whenever either archive changes. Also hosts the Gerber
-// view area in the reserved bottom section. At the current v2 debugging
-// stage (per Igor, 2026-07-18): the list shows EVERY file in archive A -
-// deliberately unfiltered, because unrecognized Gerber extensions in real
-// supplier archives were a confirmed past problem and filtering would
-// hide exactly the interesting files - and Show renders whichever file is
-// selected through the new mask pipeline, reporting the render time after
-// each push. The differing-pair gating and two-layer overlay compare
-// return in milestone M4, after the rendering passes the visual gate.
+// overlay-compare area in the reserved bottom section (M4, see
+// docs/superpowers/specs/2026-07-18-gerber-render-v2-m4-overlay-design.md):
+// every changed Gerber pair between the two archives is listed; Show
+// renders both revisions in one CompositeView, additively tinted (new =
+// green, old = red, unchanged = yellow overlap) - the CAMMaster-style
+// compare the whole v2 rendering rewrite was built toward.
 class ArchiveComparePage : public QWidget {
     Q_OBJECT
 
@@ -29,24 +29,29 @@ public:
     explicit ArchiveComparePage(QWidget *parent = nullptr);
 
 private:
-    void populateFileList();
     void runComparison();
-    void showSelectedFile();
-    void renderShownLayer(const QRectF &windowMm, double pxPerMm);
+    void rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized, const QVector<DifferingPair> &drill);
+    void showSelectedPair();
+    void renderShownPair(const QRectF &windowMm, double pxPerMm);
 
     ArchivePanel *panelA_;
     ArchivePanel *panelB_;
 
     QWidget *gerberDiffContent_;
-    QListWidget *fileListA_;
+    QListWidget *gerberPairList_;
+    QLabel *pairStatusLabel_;
+    QLabel *skippedUnrecognizedLabel_;
+    QWidget *skippedUnrecognizedButtonRow_;
+    QLabel *skippedDrillLabel_;
     QPushButton *showButton_;
     QLabel *renderTimeLabel_;
     CompositeView *gerberCanvas_;
 
-    // relativePath of every file in archive A, same order as fileListA_'s
-    // rows (the list displays these verbatim).
-    QStringList filePathsA_;
+    // The pairs behind gerberPairList_'s rows, same order/index.
+    QVector<DifferingPair> eligiblePairs_;
 
-    // The layer currently on the canvas; empty until Show is first clicked.
-    Layer shownLayer_;
+    // The two revisions currently on the canvas; either may be a
+    // default-constructed empty Layer if that side failed to parse.
+    Layer shownLayerA_;
+    Layer shownLayerB_;
 };
