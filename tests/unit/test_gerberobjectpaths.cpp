@@ -17,6 +17,8 @@ class TestGerberObjectPaths : public QObject {
 
 private slots:
     void arcStrokeFollowsTrueCurve();
+    void equalEndpointArcDrawsFullCircle();
+    void rectangleApertureStrokeHasSharpCorners();
     void layerBoundsUnionAllObjects();
 };
 
@@ -66,6 +68,70 @@ void TestGerberObjectPaths::arcStrokeFollowsTrueCurve()
     // Sanity: both endpoints are covered regardless of representation.
     QVERIFY(path.contains(QPointF(1000.0, 0.0)));
     QVERIFY(path.contains(QPointF(0.0, 1000.0)));
+}
+
+void TestGerberObjectPaths::equalEndpointArcDrawsFullCircle()
+{
+    // An arc object whose endpoints coincide is a full 360-degree circle
+    // (G75 semantics, see the parser's multi-quadrant test) - the stroke
+    // must cover the whole ring, not collapse to a dot at the start
+    // point. Circle: center (0,0), radius 10mm, 0.5mm pen.
+    GerberAperture roundPen;
+    roundPen.shape = GerberAperture::Shape::Circle;
+    roundPen.modifiers = {0.5};
+
+    Layer layer;
+    layer.apertures.insert(10, roundPen);
+
+    GraphicObject arc;
+    arc.type = ObjectType::Stroke;
+    arc.apertureCode = 10;
+    arc.position = nm(10.0, 0.0);
+    arc.strokeTo = nm(10.0, 0.0);
+    arc.isArc = true;
+    arc.arcCenter = nm(0.0, 0.0);
+    arc.arcCounterClockwise = true;
+
+    const QPainterPath path = GerberObjectPaths::objectPathMm(arc, layer);
+
+    QVERIFY2(path.contains(QPointF(10.0, 0.0)), "ring must cover its start point");
+    QVERIFY2(path.contains(QPointF(0.0, 10.0)), "ring must cover 90 degrees");
+    QVERIFY2(path.contains(QPointF(-10.0, 0.0)), "ring must cover 180 degrees");
+    QVERIFY2(path.contains(QPointF(0.0, -10.0)), "ring must cover 270 degrees");
+    QVERIFY2(!path.contains(QPointF(0.0, 0.0)), "ring center must stay empty");
+}
+
+void TestGerberObjectPaths::rectangleApertureStrokeHasSharpCorners()
+{
+    // A draw with a RECTANGULAR aperture sweeps the axis-aligned
+    // rectangle along the segment (Gerber spec): the result has sharp
+    // corners and flat ends - the rectangle does not rotate with the
+    // direction and there are no round caps. Rendering it as a
+    // round-capped capsule (the circular-pen shape) wrongly rounds off
+    // trace corners. Rect 1.0 x 0.5mm, diagonal stroke (0,0) -> (2,2).
+    GerberAperture rectPen;
+    rectPen.shape = GerberAperture::Shape::Rectangle;
+    rectPen.modifiers = {1.0, 0.5};
+
+    Layer layer;
+    layer.apertures.insert(10, rectPen);
+
+    GraphicObject stroke;
+    stroke.type = ObjectType::Stroke;
+    stroke.apertureCode = 10;
+    stroke.position = nm(0.0, 0.0);
+    stroke.strokeTo = nm(2.0, 2.0);
+    layer.objects.append(stroke);
+
+    const QPainterPath path = GerberObjectPaths::objectPathMm(stroke, layer);
+
+    // The end rectangle's outer corner (2.5, 2.25) must be covered right
+    // up to its edge - a round cap cuts this corner off.
+    QVERIFY2(path.contains(QPointF(2.49, 2.24)), "sharp corner of the swept rectangle must be covered");
+    // Directly above the end point, beyond the rectangle's half-height,
+    // must be empty - a round cap (radius = half-WIDTH, 0.5) bulges out
+    // to y=2.5 there.
+    QVERIFY2(!path.contains(QPointF(2.0, 2.4)), "no round-cap bulge beyond the rectangle's half-height");
 }
 
 void TestGerberObjectPaths::layerBoundsUnionAllObjects()

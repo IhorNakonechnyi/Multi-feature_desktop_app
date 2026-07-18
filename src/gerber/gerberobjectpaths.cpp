@@ -1,5 +1,6 @@
 #include "gerberobjectpaths.h"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -36,11 +37,67 @@ QPainterPath resolveFlashPath(const GerberAperture &aperture, const QPointF &pos
     return translate.map(flashPath);
 }
 
-// A drawn line's "pen" is the current aperture's own shape - for the
-// overwhelmingly common circular-aperture case, a stroke is just a
-// capsule (rectangle plus two round end caps) between from/to.
+// Convex hull of a small point set (Andrew's monotone chain). Used for
+// the rectangular-aperture stroke below - Qt has no convex-hull helper,
+// and boolean-uniting the two end rectangles with a connecting band is
+// exactly the kind of QPainterPath boolean op this codebase has learned
+// to avoid (documented fragility incidents; see the design doc).
+QPolygonF convexHull(QVector<QPointF> points)
+{
+    std::sort(points.begin(), points.end(), [](const QPointF &a, const QPointF &b) {
+        return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+    });
+    const auto cross = [](const QPointF &o, const QPointF &a, const QPointF &b) {
+        return (a.x() - o.x()) * (b.y() - o.y()) - (a.y() - o.y()) * (b.x() - o.x());
+    };
+    QVector<QPointF> hull(2 * points.size());
+    int k = 0;
+    for (int i = 0; i < points.size(); ++i) { // lower hull
+        while (k >= 2 && cross(hull[k - 2], hull[k - 1], points[i]) <= 0.0) {
+            --k;
+        }
+        hull[k++] = points[i];
+    }
+    for (int i = points.size() - 2, lower = k + 1; i >= 0; --i) { // upper hull
+        while (k >= lower && cross(hull[k - 2], hull[k - 1], points[i]) <= 0.0) {
+            --k;
+        }
+        hull[k++] = points[i];
+    }
+    hull.resize(k - 1); // last point repeats the first
+    return QPolygonF(hull);
+}
+
+// A drawn line's "pen" is the current aperture's own shape. Two cases
+// matter in practice (the only shapes the spec allows for strokes):
+//
+// - Circle (the overwhelmingly common case): a capsule - rectangle plus
+//   two round end caps - between from/to. Corners where two such
+//   strokes meet look rounded, which is CORRECT: that's the physical
+//   shape a round pen produces, and reference viewers show the same.
+// - Rectangle: the AXIS-ALIGNED rectangle swept along the segment (it
+//   does not rotate with the direction, and there are no round caps) -
+//   the Minkowski sum of the segment with the rectangle, i.e. the
+//   convex hull of the two end rectangles. Sharp corners, flat ends.
 QPainterPath resolveLinearStrokePath(const GerberAperture &aperture, const QPointF &from, const QPointF &to)
 {
+    if (aperture.shape == GerberAperture::Shape::Rectangle && aperture.modifiers.size() >= 2) {
+        const double halfWidth = aperture.modifiers.at(0) / 2.0;
+        const double halfHeight = aperture.modifiers.at(1) / 2.0;
+        QVector<QPointF> corners;
+        corners.reserve(8);
+        for (const QPointF &end : {from, to}) {
+            corners << QPointF(end.x() - halfWidth, end.y() - halfHeight)
+                    << QPointF(end.x() + halfWidth, end.y() - halfHeight)
+                    << QPointF(end.x() + halfWidth, end.y() + halfHeight)
+                    << QPointF(end.x() - halfWidth, end.y() + halfHeight);
+        }
+        QPainterPath swept;
+        swept.addPolygon(convexHull(corners));
+        swept.closeSubpath();
+        return swept;
+    }
+
     const double width = aperture.modifiers.value(0, 0.1);
     QPainterPath stroke;
     const double dx = to.x() - from.x();
@@ -70,6 +127,19 @@ QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF 
     const double startAngle = std::atan2(from.y() - center.y(), from.x() - center.x());
     double endAngle = std::atan2(to.y() - center.y(), to.x() - center.x());
     const double radius = std::hypot(from.x() - center.x(), from.y() - center.y());
+
+    // Coinciding endpoints mean a full 360-degree circle (G75 multi-
+    // quadrant semantics - how CAM tools draw round cutouts and via
+    // rings). Without this the sweep below normalizes to zero and the
+    // whole circle collapses into a single dot at the start point.
+    if (from == to) {
+        QPainterPath ring;
+        ring.addEllipse(center, radius, radius);
+        QPainterPathStroker fullCircleStroker;
+        fullCircleStroker.setWidth(width);
+        fullCircleStroker.setCurveThreshold(0.001); // mm units - see below
+        return fullCircleStroker.createStroke(ring);
+    }
 
     if (counterClockwise && endAngle < startAngle) {
         endAngle += 2.0 * std::numbers::pi;

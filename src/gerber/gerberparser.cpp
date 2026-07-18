@@ -1,6 +1,7 @@
 #include "gerberparser.h"
 
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <utility>
 
@@ -96,6 +97,15 @@ struct ParserState {
     // (a file must give an explicit D before its first operation).
     int modalOperationCode = -1;
 
+    // G74 single-quadrant arc mode: I/J center offsets are UNSIGNED and
+    // the arc spans at most 90 degrees - the parser must resolve the
+    // offsets' signs geometrically (see resolveSingleQuadrantCenterOffset).
+    // false = G75 multi-quadrant (signed offsets, any sweep), which is
+    // also the default here: modern files declare G75 explicitly, and
+    // treating offsets as signed matches this parser's long-standing
+    // behavior for files that declare neither.
+    bool singleQuadrantArcs = false;
+
     // The parse's output: one GraphicObject per flash/stroke/region, in
     // file order, each tagged with the polarity in effect when it was
     // emitted. This replaces the old "build QPainterPath geometry into a
@@ -149,6 +159,52 @@ struct ParserState {
 PointNm toNm(const QPointF &mm)
 {
     return PointNm{GerberFormat::mmToNm(mm.x()), GerberFormat::mmToNm(mm.y())};
+}
+
+// G74 single-quadrant arcs give I/J as unsigned distances; of the four
+// possible sign combinations for the center offset, exactly one yields a
+// geometrically valid arc: both endpoints (nearly) equidistant from the
+// center, sweeping at most 90 degrees in the commanded direction. Try
+// all four and pick the best match by radius consistency, breaking ties
+// by the smaller sweep. Falls back to the offsets as given if nothing
+// qualifies (defensive - a malformed arc then behaves like today's
+// signed interpretation instead of vanishing).
+QPointF resolveSingleQuadrantCenterOffset(const QPointF &from, const QPointF &to, const QPointF &offset,
+                                          bool counterClockwise)
+{
+    constexpr double kQuarterTurn = std::numbers::pi / 2.0;
+    const double absI = std::abs(offset.x());
+    const double absJ = std::abs(offset.y());
+
+    QPointF best = offset;
+    double bestMismatch = std::numeric_limits<double>::max();
+    double bestSweep = std::numeric_limits<double>::max();
+    for (const double signX : {1.0, -1.0}) {
+        for (const double signY : {1.0, -1.0}) {
+            const QPointF candidateOffset(signX * absI, signY * absJ);
+            const QPointF center = from + candidateOffset;
+            const double radiusFrom = std::hypot(from.x() - center.x(), from.y() - center.y());
+            const double radiusTo = std::hypot(to.x() - center.x(), to.y() - center.y());
+            const double mismatch = std::abs(radiusFrom - radiusTo);
+
+            const double startAngle = std::atan2(from.y() - center.y(), from.x() - center.x());
+            const double endAngle = std::atan2(to.y() - center.y(), to.x() - center.x());
+            // Sweep in the commanded direction, normalized to [0, 2pi).
+            double sweep = counterClockwise ? (endAngle - startAngle) : (startAngle - endAngle);
+            sweep = std::fmod(sweep + 4.0 * std::numbers::pi, 2.0 * std::numbers::pi);
+
+            if (sweep > kQuarterTurn + 1e-9) {
+                continue; // single-quadrant arcs never exceed 90 degrees
+            }
+            if (mismatch < bestMismatch - 1e-9
+                || (std::abs(mismatch - bestMismatch) <= 1e-9 && sweep < bestSweep)) {
+                bestMismatch = mismatch;
+                bestSweep = sweep;
+                best = candidateOffset;
+            }
+        }
+    }
+    return best;
 }
 
 // Parses "%ADnnSHAPE,mod1,mod2,...*%" (already split from its '%...%'
@@ -567,6 +623,16 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             && (text.length() == 2 || !text.at(2).isDigit())) {
             text.insert(1, QLatin1Char('0'));
         }
+        if (text.startsWith(QLatin1String("G74")) || text.startsWith(QLatin1String("G75"))) {
+            // Arc quadrant mode. Both are usually standalone statements;
+            // strip the code and keep processing anything that follows on
+            // the same statement (some writers chain "G75G03X...").
+            state.singleQuadrantArcs = (text.at(2) == QLatin1Char('4'));
+            text = text.mid(3);
+            if (text.isEmpty()) {
+                continue;
+            }
+        }
         if (text.startsWith(QLatin1String("G54")) || text.startsWith(QLatin1String("G55"))) {
             // RS-274D legacy prefixes still emitted by real CAM tools
             // (confirmed in a real supplier file, TARGET 3001! output):
@@ -704,9 +770,14 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
                 const int end = nextUppercaseIndex(coordinatePart, jIndex + 1);
                 centerOffset.setY(state.format.decodeCoordinateMm(coordinatePart.mid(jIndex + 1, end - jIndex - 1)));
             }
+            const bool counterClockwise =
+                state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
+            if (state.singleQuadrantArcs) {
+                centerOffset = resolveSingleQuadrantCenterOffset(previousPoint, state.currentPoint,
+                                                                centerOffset, counterClockwise);
+            }
             const QPointF center = previousPoint + centerOffset;
-            emitArcStroke(state, previousPoint, state.currentPoint, center,
-                          state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc);
+            emitArcStroke(state, previousPoint, state.currentPoint, center, counterClockwise);
         } else if (opCode == 1) {
             emitLinearStroke(state, previousPoint, state.currentPoint);
         } else if (opCode == 3) {

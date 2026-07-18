@@ -44,6 +44,8 @@ private slots:
     void g54ApertureSelectPrefixIsHonored();
     void unpaddedGCodesAreHonored();
     void operationCodeIsModalOnBareCoordinates();
+    void multiQuadrantArcWithEqualEndpointsIsAFullCircle();
+    void singleQuadrantArcResolvesUnsignedCenterOffsets();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -827,6 +829,63 @@ void TestGerberParser::operationCodeIsModalOnBareCoordinates()
     QCOMPARE(second.position.y, GerberFormat::mmToNm(1.0));
     QCOMPARE(second.strokeTo.x, GerberFormat::mmToNm(3.0));
     QCOMPARE(second.strokeTo.y, GerberFormat::mmToNm(1.0));
+}
+
+void TestGerberParser::multiQuadrantArcWithEqualEndpointsIsAFullCircle()
+{
+    // G75 multi-quadrant mode: an arc draw whose end point equals its
+    // start is a full 360-degree circle (Gerber spec 4.7) - the standard
+    // way CAM tools draw round cutouts on mechanical layers. It must be
+    // emitted as an arc object with equal endpoints (the renderer draws
+    // the full ring from that), not collapse to a zero-length dot.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G75*\n"
+        "X020000Y010000D2*\n"
+        "G03X020000Y010000I-10000J0D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const GraphicObject &arc = layer.objects.at(0);
+    QCOMPARE(arc.type, ObjectType::Stroke);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.position.x, arc.strokeTo.x);
+    QCOMPARE(arc.position.y, arc.strokeTo.y);
+    // Center = start + (I,J) = (2,1) + (-1,0) = (1,1)mm.
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(1.0));
+}
+
+void TestGerberParser::singleQuadrantArcResolvesUnsignedCenterOffsets()
+{
+    // G74 single-quadrant mode: I/J are UNSIGNED distances - the parser
+    // must pick the signs that give a geometrically valid arc of at most
+    // 90 degrees in the commanded direction. Here: CCW quarter arc from
+    // (1,0) to (0,1) around (0,0), written with unsigned "I10000J0".
+    // Treating I as +1 puts the center at (2,0), where the radii don't
+    // even match - the signs must resolve to (-1,0) giving center (0,0).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X010000Y000000D2*\n"
+        "G03X000000Y010000I10000J0D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const GraphicObject &arc = layer.objects.at(0);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
 }
 
 QTEST_MAIN(TestGerberParser)
