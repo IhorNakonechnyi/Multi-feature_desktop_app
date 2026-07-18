@@ -61,6 +61,12 @@ bool GerberFileType::isRecognized(const QString &fileName)
     return false;
 }
 
+bool GerberFileType::isDrillFile(const QString &fileName)
+{
+    const QString extension = QFileInfo(fileName).suffix().toLower();
+    return extension == QStringLiteral("drl") || extension == QStringLiteral("xln");
+}
+
 void GerberFileType::addUserExtension(const QString &extension)
 {
     QSettings settings = makeSettings();

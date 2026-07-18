@@ -22,6 +22,9 @@ private slots:
     void unknownExtensionIsNotRecognized();
     void addUserExtensionMakesItRecognized();
     void emptyExtensionIsNotRecognized();
+    void drillExtensionsAreRecognizedAsDrillFiles();
+    void gerberExtensionIsNotADrillFile();
+    void emptyExtensionIsNotADrillFile();
 
 private:
     QTemporaryDir settingsDir_;
@@ -54,6 +57,23 @@ void TestGerberFileType::addUserExtensionMakesItRecognized()
 void TestGerberFileType::emptyExtensionIsNotRecognized()
 {
     QVERIFY(!GerberFileType::isRecognized("noextension"));
+}
+
+void TestGerberFileType::drillExtensionsAreRecognizedAsDrillFiles()
+{
+    QVERIFY(GerberFileType::isDrillFile("board.drl"));
+    QVERIFY(GerberFileType::isDrillFile("board.DRL"));
+    QVERIFY(GerberFileType::isDrillFile("board.xln"));
+}
+
+void TestGerberFileType::gerberExtensionIsNotADrillFile()
+{
+    QVERIFY(!GerberFileType::isDrillFile("layer.gtl"));
+}
+
+void TestGerberFileType::emptyExtensionIsNotADrillFile()
+{
+    QVERIFY(!GerberFileType::isDrillFile("noextension"));
 }
 
 QTEST_MAIN(TestGerberFileType)
