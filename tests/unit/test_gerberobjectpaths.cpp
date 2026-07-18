@@ -19,6 +19,8 @@ private slots:
     void arcStrokeFollowsTrueCurve();
     void equalEndpointArcDrawsFullCircle();
     void rectangleApertureStrokeHasSharpCorners();
+    void linearStrokeCapsAreCenteredOnEndpoints();
+    void zeroLengthDrawPaintsApertureDot();
     void layerBoundsUnionAllObjects();
 };
 
@@ -132,6 +134,68 @@ void TestGerberObjectPaths::rectangleApertureStrokeHasSharpCorners()
     // must be empty - a round cap (radius = half-WIDTH, 0.5) bulges out
     // to y=2.5 there.
     QVERIFY2(!path.contains(QPointF(2.0, 2.4)), "no round-cap bulge beyond the rectangle's half-height");
+}
+
+void TestGerberObjectPaths::linearStrokeCapsAreCenteredOnEndpoints()
+{
+    // A draw with a round aperture sweeps the CIRCLE along the segment
+    // (Minkowski sum): the round end caps are centered ON the endpoints
+    // and bulge half a width beyond them. Getting this wrong - caps
+    // pulled inside the segment - makes every polyline joint a pinch
+    // point, and curves approximated by short chords (how real CAM tools
+    // export text and fillets) render as chains of dots instead of a
+    // continuous stroke. Segment (0,0) -> (2,0), 1mm pen.
+    GerberAperture roundPen;
+    roundPen.shape = GerberAperture::Shape::Circle;
+    roundPen.modifiers = {1.0};
+
+    Layer layer;
+    layer.apertures.insert(10, roundPen);
+
+    GraphicObject stroke;
+    stroke.type = ObjectType::Stroke;
+    stroke.apertureCode = 10;
+    stroke.position = nm(0.0, 0.0);
+    stroke.strokeTo = nm(2.0, 0.0);
+
+    const QPainterPath path = GerberObjectPaths::objectPathMm(stroke, layer);
+
+    // Cap bulge: just inside half a width beyond each endpoint.
+    QVERIFY2(path.contains(QPointF(-0.45, 0.0)), "start cap must bulge past the start point");
+    QVERIFY2(path.contains(QPointF(2.45, 0.0)), "end cap must bulge past the end point");
+    // Full pen width directly above each endpoint (a pulled-in cap has
+    // already tapered to nothing here).
+    QVERIFY2(path.contains(QPointF(0.0, 0.45)), "stroke must be full-width at the start point");
+    QVERIFY2(path.contains(QPointF(2.0, -0.45)), "stroke must be full-width at the end point");
+    // And not beyond the true capsule outline.
+    QVERIFY2(!path.contains(QPointF(-0.55, 0.0)), "cap must not extend more than half a width");
+    QVERIFY2(!path.contains(QPointF(1.0, 0.55)), "body must not be wider than the pen");
+}
+
+void TestGerberObjectPaths::zeroLengthDrawPaintsApertureDot()
+{
+    // A zero-length draw (from == to) is a legitimate Gerber idiom for
+    // "stamp a dot of the current aperture here" - the swept capsule
+    // degenerates to the aperture circle itself, not to nothing.
+    // 1mm pen at (3,4).
+    GerberAperture roundPen;
+    roundPen.shape = GerberAperture::Shape::Circle;
+    roundPen.modifiers = {1.0};
+
+    Layer layer;
+    layer.apertures.insert(10, roundPen);
+
+    GraphicObject dot;
+    dot.type = ObjectType::Stroke;
+    dot.apertureCode = 10;
+    dot.position = nm(3.0, 4.0);
+    dot.strokeTo = nm(3.0, 4.0);
+
+    const QPainterPath path = GerberObjectPaths::objectPathMm(dot, layer);
+
+    QVERIFY2(path.contains(QPointF(3.0, 4.0)), "zero-length draw must paint the aperture dot");
+    QVERIFY2(path.contains(QPointF(3.45, 4.0)), "dot must have the aperture's radius");
+    QVERIFY2(!path.contains(QPointF(3.55, 4.0)), "dot must not exceed the aperture's radius");
 }
 
 void TestGerberObjectPaths::layerBoundsUnionAllObjects()

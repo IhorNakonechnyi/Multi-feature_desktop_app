@@ -104,7 +104,14 @@ QPainterPath resolveLinearStrokePath(const GerberAperture &aperture, const QPoin
     const double dy = to.y() - from.y();
     const double length = std::hypot(dx, dy);
     const double angleDegrees = qRadiansToDegrees(std::atan2(dy, dx));
-    stroke.addRoundedRect(0, -width / 2.0, length, width, width / 2.0, width / 2.0);
+    // The swept circle bulges half a width BEYOND each endpoint, so the
+    // capsule spans -w/2 .. length+w/2. A rounded rect starting at 0
+    // instead puts the cap centers w/2 inside the segment - every
+    // polyline joint then pinches to a point and chord-approximated
+    // curves render as chains of dots. As a bonus, this form degenerates
+    // to the bare aperture circle when length is 0 (a valid Gerber
+    // "stamp a dot here" draw).
+    stroke.addRoundedRect(-width / 2.0, -width / 2.0, length + width, width, width / 2.0, width / 2.0);
     QTransform transform;
     transform.translate(from.x(), from.y());
     transform.rotate(angleDegrees);
