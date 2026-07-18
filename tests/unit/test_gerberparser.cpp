@@ -42,6 +42,8 @@ private slots:
     void arcStrokeObjectCarriesCenterAndDirection();
     void regionObjectCarriesAllVertices();
     void g54ApertureSelectPrefixIsHonored();
+    void unpaddedGCodesAreHonored();
+    void operationCodeIsModalOnBareCoordinates();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -768,6 +770,63 @@ void TestGerberParser::g54ApertureSelectPrefixIsHonored()
     QCOMPARE(layer.objects.size(), 1);
     QCOMPARE(layer.objects.at(0).type, ObjectType::Flash);
     QCOMPARE(layer.objects.at(0).apertureCode, 41);
+}
+
+void TestGerberParser::unpaddedGCodesAreHonored()
+{
+    // RS-274X makes leading zeros in function codes optional: "G1" means
+    // G01, "D2" means D02. Real CAMMaster Designer exports (a real
+    // supplier board-frame layer) write "G1X...D2*" for every move; if
+    // the parser only recognizes the padded "G01" spelling, all those
+    // moves are silently dropped and the layer renders as disconnected
+    // dots and fragments from stale pen positions.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.5*%\n"
+        "D10*\n"
+        "G1X010000Y010000D2*\n"
+        "X020000Y010000D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const GraphicObject &stroke = layer.objects.at(0);
+    QCOMPARE(stroke.type, ObjectType::Stroke);
+    QCOMPARE(stroke.position.x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(stroke.position.y, GerberFormat::mmToNm(1.0));
+    QCOMPARE(stroke.strokeTo.x, GerberFormat::mmToNm(2.0));
+    QCOMPARE(stroke.strokeTo.y, GerberFormat::mmToNm(1.0));
+}
+
+void TestGerberParser::operationCodeIsModalOnBareCoordinates()
+{
+    // RS-274D operation codes are modal: after "X...D1*", following
+    // coordinate statements with NO D-code at all ("Y166772*",
+    // "X128858Y167795*") continue the same operation. Real CAMMaster
+    // Designer board-frame layers draw nearly everything this way;
+    // dropping the bare statements loses both the drawn segments AND the
+    // pen movement, leaving disconnected fragments.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.5*%\n"
+        "D10*\n"
+        "X010000Y010000D2*\n"
+        "X020000Y010000D1*\n"
+        "X030000*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    const GraphicObject &second = layer.objects.at(1);
+    QCOMPARE(second.type, ObjectType::Stroke);
+    QCOMPARE(second.position.x, GerberFormat::mmToNm(2.0));
+    QCOMPARE(second.position.y, GerberFormat::mmToNm(1.0));
+    QCOMPARE(second.strokeTo.x, GerberFormat::mmToNm(3.0));
+    QCOMPARE(second.strokeTo.y, GerberFormat::mmToNm(1.0));
 }
 
 QTEST_MAIN(TestGerberParser)

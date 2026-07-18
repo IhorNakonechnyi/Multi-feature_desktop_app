@@ -88,6 +88,14 @@ struct ParserState {
     int currentApertureCode = -1;
     QPointF currentPoint{0.0, 0.0};
 
+    // RS-274D modal operation code: after an explicit D01/D02/D03, a
+    // coordinate statement with no D-code at all repeats the same
+    // operation ("X...D1*" then "Y...*" keeps drawing). Real CAMMaster
+    // Designer exports draw nearly everything this way. -1 = no
+    // operation seen yet, so a bare coordinate statement is ignored
+    // (a file must give an explicit D before its first operation).
+    int modalOperationCode = -1;
+
     // The parse's output: one GraphicObject per flash/stroke/region, in
     // file order, each tagged with the polarity in effect when it was
     // emitted. This replaces the old "build QPainterPath geometry into a
@@ -545,6 +553,20 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             }
             continue;
         }
+        // RS-274X function codes may omit leading zeros: "G1" means G01,
+        // just as "D2" means D02 (the D side is already parsed
+        // numerically below; only the G side is matched by literal text).
+        // Real CAMMaster Designer exports write every move as
+        // "G1X...D2*" - without this normalization each of those
+        // statements missed every "G01"-literal branch, fell into the
+        // generic G handling, and was dropped whole, rendering
+        // board-frame layers as disconnected dots from stale pen
+        // positions. Normalize the one-digit spelling to two digits once,
+        // here, so every startsWith("G0x") below just works.
+        if (text.length() >= 2 && text.at(0) == QLatin1Char('G') && text.at(1).isDigit()
+            && (text.length() == 2 || !text.at(2).isDigit())) {
+            text.insert(1, QLatin1Char('0'));
+        }
         if (text.startsWith(QLatin1String("G54")) || text.startsWith(QLatin1String("G55"))) {
             // RS-274D legacy prefixes still emitted by real CAM tools
             // (confirmed in a real supplier file, TARGET 3001! output):
@@ -612,6 +634,7 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             // "repeat the last coordinate" - route it through the same
             // draw/flash/move handling below, just using currentPoint as
             // both endpoints since no new coordinate was given.
+            state.modalOperationCode = code;
             const QPointF &samePoint = state.currentPoint;
             if (code == 1) {
                 emitLinearStroke(state, samePoint, samePoint);
@@ -621,13 +644,28 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             continue;
         }
 
-        // Anything left is a coordinate + D-code command: X..Y..D0n*
+        // Anything left is a coordinate command: X..Y..D0n*, or bare
+        // coordinates with no D-code, which repeat the modal operation
+        // (see ParserState::modalOperationCode).
         const int dIndex = text.lastIndexOf(QLatin1Char('D'));
-        if (dIndex < 0) {
-            continue;
+        QString coordinatePart;
+        int opCode = -1;
+        if (dIndex >= 0) {
+            coordinatePart = text.left(dIndex);
+            opCode = text.mid(dIndex + 1).toInt();
+            state.modalOperationCode = opCode;
+        } else {
+            // Only actual coordinate data may repeat the modal operation -
+            // anything else that drifted this far (an M02 end-of-file, an
+            // unhandled code) must stay a no-op exactly as before.
+            const bool hasCoordinateData = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
+                || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'));
+            if (!hasCoordinateData || state.modalOperationCode < 0) {
+                continue;
+            }
+            coordinatePart = text;
+            opCode = state.modalOperationCode;
         }
-        const QString coordinatePart = text.left(dIndex);
-        const int opCode = text.mid(dIndex + 1).toInt();
         const QPointF previousPoint = state.currentPoint;
         applyCoordinateToken(coordinatePart, state.format, state.currentPoint);
 
