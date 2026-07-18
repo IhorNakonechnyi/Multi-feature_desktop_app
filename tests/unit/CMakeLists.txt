@@ -88,6 +88,14 @@ target_include_directories(test_layermaskrenderer PRIVATE ${CMAKE_SOURCE_DIR}/sr
 target_link_libraries(test_layermaskrenderer PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_layermaskrenderer COMMAND test_layermaskrenderer)
 
+add_executable(test_maskcompositor
+    test_maskcompositor.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/maskcompositor.cpp
+)
+target_include_directories(test_maskcompositor PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_maskcompositor PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME test_maskcompositor COMMAND test_maskcompositor)
+
 add_executable(test_gerberparser
     test_gerberparser.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp

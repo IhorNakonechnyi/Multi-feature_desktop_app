@@ -112,6 +112,13 @@ add_executable(PcbSupplierWorkflow
     src/gerber/gerberobjectpaths.cpp
     src/gerber/gerberparser.h
     src/gerber/gerberparser.cpp
+    src/gerber/layermask.h
+    src/gerber/layermaskrenderer.h
+    src/gerber/layermaskrenderer.cpp
+    src/gerber/maskcompositor.h
+    src/gerber/maskcompositor.cpp
+    src/gerber/compositeview.h
+    src/gerber/compositeview.cpp
     src/quotecompare/quotecomparepage.h
     src/quotecompare/quotecomparepage.cpp
     resources/resources.qrc

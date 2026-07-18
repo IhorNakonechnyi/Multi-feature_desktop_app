@@ -24,4 +24,8 @@ namespace GerberObjectPaths {
 // (layer.apertures / layer.macros / layer.unitScale).
 QPainterPath objectPathMm(const GraphicObject &object, const Layer &layer);
 
+// Union bounding rect (mm, Y-up) of every object's drawn area - what a
+// viewer fits its initial window to. Empty layer gives an empty rect.
+QRectF layerBoundsMm(const Layer &layer);
+
 } // namespace GerberObjectPaths

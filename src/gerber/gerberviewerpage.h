@@ -1,13 +1,30 @@
 #pragma once
 
+#include <QRectF>
 #include <QWidget>
 
-// Empty stub - the Gerber visual diff overlay (User Story 1b, v1.1) and
-// board-parameter extraction (User Story 3) both land here later. Not part
-// of v1.0.
+#include "gerberobjectmodel.h"
+
+class QLabel;
+class CompositeView;
+
+// Single-file Gerber viewer - the v2 design's M3 test milestone: open
+// one Gerber layer via the file picker and render it smoothly and
+// correctly (the visual gate judged against CAMMaster). Glue only -
+// parse, render and display all live in their own tested modules; this
+// page just connects them.
 class GerberViewerPage : public QWidget {
     Q_OBJECT
 
 public:
     explicit GerberViewerPage(QWidget *parent = nullptr);
+
+private:
+    void openFile();
+    void renderWindow(const QRectF &windowMm, double pxPerMm);
+
+    Layer layer_;
+    QRectF layerBoundsMm_;
+    QLabel *statusLabel_ = nullptr;
+    CompositeView *view_ = nullptr;
 };

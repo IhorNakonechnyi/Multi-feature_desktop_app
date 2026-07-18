@@ -138,3 +138,12 @@ QPainterPath GerberObjectPaths::objectPathMm(const GraphicObject &object, const 
     }
     return QPainterPath(); // unreachable - all ObjectType values handled above
 }
+
+QRectF GerberObjectPaths::layerBoundsMm(const Layer &layer)
+{
+    QRectF bounds;
+    for (const GraphicObject &object : layer.objects) {
+        bounds = bounds.united(objectPathMm(object, layer).boundingRect());
+    }
+    return bounds;
+}
