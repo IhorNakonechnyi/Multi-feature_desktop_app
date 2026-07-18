@@ -14,12 +14,14 @@ class QWidget;
 
 // v1.0's feature page: two side-by-side ArchivePanels, re-compared
 // automatically whenever either archive changes. Also hosts the Gerber
-// view area in the reserved bottom section: a list of eligible differing
-// pairs and a Show button. At the current v2 stage (see the 2026-07-18
-// design doc, milestone M3->M4 transition), Show renders ONLY the
-// selected pair's archive-A layer through the new mask pipeline - the
-// two-layer overlay compare is milestone M4, planned after the
-// single-layer rendering passes Igor's visual gate.
+// view area in the reserved bottom section. At the current v2 debugging
+// stage (per Igor, 2026-07-18): the list shows EVERY file in archive A -
+// deliberately unfiltered, because unrecognized Gerber extensions in real
+// supplier archives were a confirmed past problem and filtering would
+// hide exactly the interesting files - and Show renders whichever file is
+// selected through the new mask pipeline, reporting the render time after
+// each push. The differing-pair gating and two-layer overlay compare
+// return in milestone M4, after the rendering passes the visual gate.
 class ArchiveComparePage : public QWidget {
     Q_OBJECT
 
@@ -27,21 +29,24 @@ public:
     explicit ArchiveComparePage(QWidget *parent = nullptr);
 
 private:
+    void populateFileList();
     void runComparison();
-    void showSelectedPair();
+    void showSelectedFile();
     void renderShownLayer(const QRectF &windowMm, double pxPerMm);
 
     ArchivePanel *panelA_;
     ArchivePanel *panelB_;
 
     QWidget *gerberDiffContent_;
-    QListWidget *gerberPairList_;
+    QListWidget *fileListA_;
     QPushButton *showButton_;
     QLabel *renderTimeLabel_;
     CompositeView *gerberCanvas_;
-    QVector<DifferingPair> eligibleGerberPairs_;
 
-    // The layer currently on the canvas (parsed from archive A's side of
-    // the selected pair); empty until Show is first clicked.
+    // relativePath of every file in archive A, same order as fileListA_'s
+    // rows (the list displays these verbatim).
+    QStringList filePathsA_;
+
+    // The layer currently on the canvas; empty until Show is first clicked.
     Layer shownLayer_;
 };

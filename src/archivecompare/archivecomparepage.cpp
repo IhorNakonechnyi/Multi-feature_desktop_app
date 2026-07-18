@@ -17,7 +17,6 @@
 #include "archivepanel.h"
 #include "archivereader.h"
 #include "crccomparator.h"
-#include "gerberdifftrigger.h"
 
 namespace {
 
@@ -30,17 +29,6 @@ constexpr bool kAlwaysShowGerberDiffSection = true;
 // Same copper green as the standalone Gerber viewer page - one layer,
 // one familiar color, until M4's overlay brings per-layer colors.
 const QColor kLayerColor(60, 220, 60);
-
-// "folder/path/.../filename" - the folder portion (possibly empty, for a
-// root-level file) with a literal "/..." marker, then the plain filename
-// on its own line, so a deep folder tree doesn't crowd out the filename.
-QString formatPathLines(const QString &relativePath)
-{
-    const int slash = relativePath.lastIndexOf(QLatin1Char('/'));
-    const QString folder = slash < 0 ? QString() : relativePath.left(slash);
-    const QString filename = slash < 0 ? relativePath : relativePath.mid(slash + 1);
-    return folder + QLatin1String("/...\n") + filename;
-}
 
 } // namespace
 
@@ -69,15 +57,14 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *leftColumnLayout = new QVBoxLayout(leftColumn);
     leftColumnLayout->setContentsMargins(4, 4, 4, 4);
     auto *explanation = new QLabel(
-        tr("One or more Gerber layer files changed between the two archives. "
-           "Select a pair and click Show to view archive A's layer."));
+        tr("All files in archive A. Select one and click Show to render it as a Gerber layer."));
     explanation->setWordWrap(true);
     showButton_ = new QPushButton(tr("Show"));
     showButton_->setEnabled(false);
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
-    gerberPairList_ = new QListWidget;
+    fileListA_ = new QListWidget;
     leftColumnLayout->addWidget(explanation);
-    leftColumnLayout->addWidget(gerberPairList_, 1);
+    leftColumnLayout->addWidget(fileListA_, 1);
     leftColumnLayout->addWidget(showButton_);
     leftColumnLayout->addWidget(renderTimeLabel_);
 
@@ -89,12 +76,41 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
     layout->addWidget(gerberDiffContent_, 3);
 
-    connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
+    // Archive A alone is enough to populate the debugging file list;
+    // the two-sided comparison still only runs once both are picked.
+    connect(panelA_, &ArchivePanel::archiveChanged, this, [this]() {
+        populateFileList();
+        runComparison();
+    });
     connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
-    connect(gerberPairList_, &QListWidget::currentRowChanged, this,
+    connect(fileListA_, &QListWidget::currentRowChanged, this,
             [this](int row) { showButton_->setEnabled(row >= 0); });
-    connect(showButton_, &QPushButton::clicked, this, &ArchiveComparePage::showSelectedPair);
+    connect(showButton_, &QPushButton::clicked, this, &ArchiveComparePage::showSelectedFile);
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownLayer);
+}
+
+void ArchiveComparePage::populateFileList()
+{
+    fileListA_->clear();
+    filePathsA_.clear();
+    showButton_->setEnabled(false);
+
+    const QString pathA = panelA_->archivePath();
+    if (pathA.isEmpty()) {
+        return;
+    }
+    QVector<ArchiveReader::RawFileEntry> entriesA;
+    try {
+        entriesA = ArchiveReader::readArchive(pathA);
+    } catch (const ArchiveOpenError &) {
+        // Unreadable archive: the list just stays empty. runComparison
+        // reports the error dialog once both archives are picked.
+        return;
+    }
+    for (const auto &entry : entriesA) {
+        filePathsA_.append(entry.relativePath);
+        fileListA_->addItem(entry.relativePath);
+    }
 }
 
 void ArchiveComparePage::runComparison()
@@ -134,30 +150,19 @@ void ArchiveComparePage::runComparison()
     const ArchiveComparisonResult result = CrcComparator::compare(entriesA, entriesB);
     panelA_->showEntries(result.entriesA);
     panelB_->showEntries(result.entriesB);
-
-    eligibleGerberPairs_ = GerberDiffTrigger::eligiblePairs(result.differingPairs);
-    gerberPairList_->clear();
-    for (const auto &pair : eligibleGerberPairs_) {
-        const QString itemText = tr("Path to file in archive A:\n%1\n\nPath to file in archive B:\n%2")
-                                      .arg(formatPathLines(pair.relativePathA), formatPathLines(pair.relativePathB));
-        gerberPairList_->addItem(itemText);
-    }
-    showButton_->setEnabled(false);
-    gerberDiffContent_->setVisible(kAlwaysShowGerberDiffSection || !eligibleGerberPairs_.isEmpty());
 }
 
-void ArchiveComparePage::showSelectedPair()
+void ArchiveComparePage::showSelectedFile()
 {
-    const int row = gerberPairList_->currentRow();
-    if (row < 0 || row >= eligibleGerberPairs_.size()) {
+    const int row = fileListA_->currentRow();
+    if (row < 0 || row >= filePathsA_.size()) {
         return;
     }
 
-    // Current v2 stage: render archive A's side of the pair, alone,
-    // through the new mask pipeline. The old-vs-new overlay compare is
-    // M4, gated on this rendering passing visual inspection first.
-    const QByteArray bytes =
-        ArchiveReader::readEntryBytes(panelA_->archivePath(), eligibleGerberPairs_.at(row).relativePathA);
+    // Current v2 debugging stage: render the selected archive-A file,
+    // alone, through the new mask pipeline. The old-vs-new overlay
+    // compare is M4, gated on this rendering passing visual inspection.
+    const QByteArray bytes = ArchiveReader::readEntryBytes(panelA_->archivePath(), filePathsA_.at(row));
     if (bytes.isEmpty()) {
         renderTimeLabel_->setText(tr("Could not read the file from archive A."));
         return;
