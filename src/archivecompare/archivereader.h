@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include <QByteArray>
 #include <QString>
 #include <QVector>
 
@@ -38,5 +39,15 @@ struct RawFileEntry {
 // location (FR-002). Throws ArchiveOpenError if the top-level archive
 // can't be opened.
 QVector<RawFileEntry> readArchive(const QString &filePath);
+
+// Reads one entry's raw bytes directly out of archiveFilePath (which is
+// itself a real filesystem path to the top-level archive). entryRelativePath
+// is one of the RawFileEntry::relativePath values readArchive produces,
+// which may cross into a nested zip (e.g. "wrapper/archive3.zip/top.gtl") -
+// see readArchive's own recursion. Returns an empty QByteArray if the entry
+// can't be found or read; unlike readArchive, this doesn't throw - a single
+// missing/corrupt entry when opening the Gerber diff view isn't as
+// catastrophic as failing to open the whole archive.
+QByteArray readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath);
 
 } // namespace ArchiveReader

@@ -9,6 +9,14 @@ target_include_directories(test_archivecomparator PRIVATE ${CMAKE_SOURCE_DIR}/sr
 target_link_libraries(test_archivecomparator PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME test_archivecomparator COMMAND test_archivecomparator)
 
+add_executable(test_archivereader
+    test_archivereader.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivereader.cpp
+)
+target_include_directories(test_archivereader PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivereader PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
+add_test(NAME test_archivereader COMMAND test_archivereader)
+
 add_executable(test_gerberdifftrigger
     test_gerberdifftrigger.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/gerberdifftrigger.cpp
