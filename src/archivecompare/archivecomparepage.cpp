@@ -77,9 +77,10 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     layout->addWidget(splitter, 7);
 
     // Bottom area: the Gerber overlay-compare section. Fixed rather than a
-    // resizable splitter, matching the tree panes above. Starts hidden;
-    // runComparison() shows it once there's at least one changed pair
-    // worth telling the user about (eligible, drill, or unrecognized).
+    // resizable splitter, matching the tree panes above. Always visible
+    // (keeps the 70/30 layout stable from launch) - an empty list plus the
+    // explanation label is the natural "nothing to compare yet" state, no
+    // separate empty-state UI needed.
     gerberDiffContent_ = new QWidget;
     auto *gerberDiffLayout = new QHBoxLayout(gerberDiffContent_);
     gerberDiffLayout->setContentsMargins(0, 0, 0, 0);
@@ -129,7 +130,6 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
     gerberDiffLayout->addWidget(leftColumn, 3);
     gerberDiffLayout->addWidget(gerberCanvas_, 7);
-    gerberDiffContent_->setVisible(false);
 
     layout->addWidget(gerberDiffContent_, 3);
 
@@ -198,8 +198,6 @@ void ArchiveComparePage::runComparison()
     const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
     const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
     rebuildSkippedPairsUi(unrecognized, drill);
-
-    gerberDiffContent_->setVisible(!eligiblePairs_.isEmpty() || !unrecognized.isEmpty() || !drill.isEmpty());
 }
 
 void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized,
