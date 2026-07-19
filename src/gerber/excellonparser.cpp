@@ -199,6 +199,17 @@ bool tryParseFileFormatComment(const QString &line, ExcellonState &state)
     return true;
 }
 
+// "INCH,TZ" / "METRIC,LZ,000.000" / a bare "INCH" or "METRIC" - the
+// header's unit declaration, optionally followed by a zero-suppression
+// mode. Sets the public-spec default digit counts (2:4 for INCH, 3:3 for
+// METRIC) unless a FILE_FORMAT comment already set them explicitly (see
+// digitsExplicitlySet - checked regardless of which line came first in the
+// file). LZ/TZ mapping: this parser treats the header's own 'L'/'T' letter
+// the same way Gerber's %FS flag does (L = leading zero omitted),
+// defaulting to L when neither is present - real-world Excellon tooling is
+// not fully consistent on this exact point, so this is a documented
+// best-effort default; the M5.4/M5.5 visual gate against real supplier
+// files is the actual correctness check, not this comment.
 bool tryParseUnitsLine(const QString &line, ExcellonState &state)
 {
     const bool isInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);

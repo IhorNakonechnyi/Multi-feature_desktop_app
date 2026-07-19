@@ -11,10 +11,10 @@
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
+#include "../gerber/excellonparser.h"
 #include "../gerber/gerberfiletype.h"
 #include "../gerber/gerberobjectpaths.h"
 #include "../gerber/gerberparser.h"
-#include "../gerber/excellonparser.h"
 #include "../gerber/layermaskrenderer.h"
 #include "../gerber/maskcompositor.h"
 #include "archivepanel.h"
@@ -301,7 +301,7 @@ void ArchiveComparePage::showSelectedPair()
     const QRectF unitedBounds = boundsA.united(boundsB);
 
     if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
-        pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2").arg(parseErrorA, parseErrorB));
+        pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2.").arg(parseErrorA, parseErrorB));
     } else if (!parseErrorA.isEmpty()) {
         pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing old file only.").arg(parseErrorA));
     } else if (!parseErrorB.isEmpty()) {
@@ -317,6 +317,7 @@ void ArchiveComparePage::showSelectedPair()
     }
 
     if (unitedBounds.isEmpty()) {
+        gerberCanvas_->setComposite(QImage(), QRectF());
         return;
     }
     gerberCanvas_->fitTo(unitedBounds); // emits renderRequested -> renderShownPair

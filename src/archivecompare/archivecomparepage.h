@@ -5,7 +5,6 @@
 #include <QWidget>
 
 #include "../gerber/gerberobjectmodel.h"
-#include "../gerber/excellonparser.h"
 #include "archivecomparisonresult.h"
 
 class ArchivePanel;
