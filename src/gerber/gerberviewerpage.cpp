@@ -10,6 +10,8 @@
 
 #include "../common/filepicker.h"
 #include "compositeview.h"
+#include "excellonparser.h"
+#include "gerberfiletype.h"
 #include "gerberobjectpaths.h"
 #include "gerberparser.h"
 #include "layermaskrenderer.h"
@@ -62,12 +64,27 @@ void GerberViewerPage::openFile()
         return;
     }
     QTextStream stream(&file);
-    layer_ = GerberParser::parseContentToObjects(stream.readAll());
+    const QString content = stream.readAll();
+
+    // Dispatch by extension, same rule as ArchiveComparePage::
+    // parseGerberOrDrill - a drill file needs ExcellonParser, not
+    // GerberParser, which doesn't speak Excellon syntax at all.
+    if (GerberFileType::isDrillFile(filePath)) {
+        try {
+            layer_ = ExcellonParser::parseContentToObjects(content);
+        } catch (const ExcellonParser::AmbiguousFormatError &error) {
+            statusLabel_->setText(
+                tr("%1: %2").arg(QFileInfo(filePath).fileName(), error.message()));
+            return;
+        }
+    } else {
+        layer_ = GerberParser::parseContentToObjects(content);
+    }
     layerBoundsMm_ = GerberObjectPaths::layerBoundsMm(layer_);
 
     if (layerBoundsMm_.isEmpty()) {
         statusLabel_->setText(
-            tr("%1: no drawable Gerber content found.").arg(QFileInfo(filePath).fileName()));
+            tr("%1: no drawable content found.").arg(QFileInfo(filePath).fileName()));
         return;
     }
 
