@@ -20,6 +20,9 @@ private slots:
     void buriedSubtreePlusUnrelatedNoise();
     void duplicateClassificationPropagates();
     void ambiguousDuplicateLeftUnmatched();
+    void selfNestedDuplicateIgnoredWithoutCounterpart();
+    void firstOccurrenceStillFlaggedWhenTrulyMissing();
+    void sameNameDifferentCrcNotTreatedAsSelfDuplicate();
     void differingPairFromExactPathMatch();
     void differingPairFromFilenameFallback();
     void noDifferingPairForIdenticalOrOnlyInOne();
@@ -163,6 +166,66 @@ void TestArchiveComparator::ambiguousDuplicateLeftUnmatched()
     QCOMPARE(static_cast<int>(result.entriesA[1].classification),
              static_cast<int>(EntryClassification::OnlyInThisArchive));
     QCOMPARE(static_cast<int>(result.entriesB[0].classification),
+             static_cast<int>(EntryClassification::OnlyInThisArchive));
+}
+
+// A file accidentally re-embedded inside its own archive (e.g. a nested zip
+// that duplicates files already present at top level - "archive contains a
+// copy of itself") must not show as a false OnlyInThisArchive diff just
+// because the *other* archive has no matching leftover to pair it with via
+// Pass 2. The canonical (first-seen) copy matches B normally; the extra
+// internal copy is recognized as a same-name/same-CRC duplicate of it and
+// forced green unconditionally.
+void TestArchiveComparator::selfNestedDuplicateIgnoredWithoutCounterpart()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {
+        {"layer1.gtl", 111, 10}, {"backup.zip/layer1.gtl", 111, 10}};
+    const QVector<ArchiveReader::RawFileEntry> b = {{"layer1.gtl", 111, 10}};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(result.entriesA.size(), 2);
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(result.entriesB.size(), 1);
+    QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(result.differingPairs.size(), 0);
+}
+
+// The duplicate-suppression rule only silences *extra* internal copies -
+// it must not hide a genuine "this file (and its accidental duplicate)
+// don't exist in the other archive at all" case. Only entriesA[1] (the
+// second occurrence) is forced green; entriesA[0], the first occurrence,
+// still surfaces as a real OnlyInThisArchive diff.
+void TestArchiveComparator::firstOccurrenceStillFlaggedWhenTrulyMissing()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {
+        {"layer1.gtl", 111, 10}, {"backup.zip/layer1.gtl", 111, 10}};
+    const QVector<ArchiveReader::RawFileEntry> b = {};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(result.entriesA.size(), 2);
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification),
+             static_cast<int>(EntryClassification::OnlyInThisArchive));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
+}
+
+// Same filename appearing twice with different CRCs is coincidence, not a
+// duplicate - the self-nested-duplicate rule must not suppress it. Both
+// stay OnlyInThisArchive when neither has a counterpart on the other side.
+void TestArchiveComparator::sameNameDifferentCrcNotTreatedAsSelfDuplicate()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {
+        {"folder1/x.txt", 100, 10}, {"folder2/x.txt", 200, 10}};
+    const QVector<ArchiveReader::RawFileEntry> b = {};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(result.entriesA.size(), 2);
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification),
+             static_cast<int>(EntryClassification::OnlyInThisArchive));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification),
              static_cast<int>(EntryClassification::OnlyInThisArchive));
 }
 

@@ -1,6 +1,7 @@
 #include "crccomparator.h"
 
 #include <QHash>
+#include <QSet>
 
 namespace {
 
@@ -38,6 +39,29 @@ DuplicateGroups groupByFilenameAndCrc(const QVector<RawFileEntry> &entries, cons
     return groups;
 }
 
+// Indices of entries that are an accidental extra copy of an earlier entry
+// in the *same* archive (same filename, same CRC - e.g. a nested zip that
+// re-embeds files already present elsewhere in the same archive, "archive
+// contains a copy of itself"). First-seen-wins: only the 2nd+ occurrence of
+// a given (filename, crc) pair counts as a duplicate, so a file genuinely
+// absent from the other archive still surfaces once via its first
+// occurrence.
+QSet<int> selfDuplicateIndices(const QVector<RawFileEntry> &entries)
+{
+    QHash<QString, QSet<quint32>> seenCrcsByFilename;
+    QSet<int> duplicates;
+    for (int i = 0; i < entries.size(); ++i) {
+        const RawFileEntry &entry = entries.at(i);
+        QSet<quint32> &seenCrcs = seenCrcsByFilename[filenameOf(entry.relativePath)];
+        if (seenCrcs.contains(entry.crc32)) {
+            duplicates.insert(i);
+        } else {
+            seenCrcs.insert(entry.crc32);
+        }
+    }
+    return duplicates;
+}
+
 } // namespace
 
 ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entriesA,
@@ -55,11 +79,23 @@ ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entr
     QVector<int> leftoverA;
     QVector<int> leftoverB;
 
+    const QSet<int> duplicatesA = selfDuplicateIndices(entriesA);
+    const QSet<int> duplicatesB = selfDuplicateIndices(entriesB);
+
     for (int i = 0; i < entriesA.size(); ++i) {
         const RawFileEntry &entry = entriesA[i];
         ArchiveEntry &out = result.entriesA[i];
         out.relativePath = entry.relativePath;
         out.sizeBytes = entry.sizeBytes;
+
+        if (duplicatesA.contains(i)) {
+            // An accidental extra copy of a file already accounted for
+            // elsewhere in this same archive - not a real difference to
+            // compare, so it's forced green unconditionally rather than run
+            // through Pass 1/2 matching against the other archive.
+            out.classification = EntryClassification::Identical;
+            continue;
+        }
 
         const auto it = crcByPathB.constFind(entry.relativePath);
         if (it == crcByPathB.constEnd()) {
@@ -81,6 +117,11 @@ ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entr
         ArchiveEntry &out = result.entriesB[i];
         out.relativePath = entry.relativePath;
         out.sizeBytes = entry.sizeBytes;
+
+        if (duplicatesB.contains(i)) {
+            out.classification = EntryClassification::Identical;
+            continue;
+        }
 
         const auto it = crcByPathA.constFind(entry.relativePath);
         if (it == crcByPathA.constEnd()) {
