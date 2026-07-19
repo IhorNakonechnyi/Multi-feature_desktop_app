@@ -9,13 +9,23 @@ bool hasDrillSide(const DifferingPair &pair)
     return GerberFileType::isDrillFile(pair.relativePathA) || GerberFileType::isDrillFile(pair.relativePathB);
 }
 
+bool bothSidesDrillFiles(const DifferingPair &pair)
+{
+    return GerberFileType::isDrillFile(pair.relativePathA) && GerberFileType::isDrillFile(pair.relativePathB);
+}
+
+bool isMixedDrillPair(const DifferingPair &pair)
+{
+    return hasDrillSide(pair) && !bothSidesDrillFiles(pair);
+}
+
 } // namespace
 
 QVector<DifferingPair> GerberDiffTrigger::eligiblePairs(const QVector<DifferingPair> &differingPairs)
 {
     QVector<DifferingPair> eligible;
     for (const auto &pair : differingPairs) {
-        if (hasDrillSide(pair)) {
+        if (isMixedDrillPair(pair)) {
             continue;
         }
         if (GerberFileType::isRecognized(pair.relativePathA) && GerberFileType::isRecognized(pair.relativePathB)) {
@@ -43,7 +53,7 @@ QVector<DifferingPair> GerberDiffTrigger::drillPairs(const QVector<DifferingPair
 {
     QVector<DifferingPair> drill;
     for (const auto &pair : differingPairs) {
-        if (hasDrillSide(pair)) {
+        if (isMixedDrillPair(pair)) {
             drill.append(pair);
         }
     }

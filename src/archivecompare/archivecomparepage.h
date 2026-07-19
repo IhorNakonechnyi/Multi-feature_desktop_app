@@ -33,6 +33,7 @@ private:
     void rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized, const QVector<DifferingPair> &drill);
     void showSelectedPair();
     void renderShownPair(const QRectF &windowMm, double pxPerMm);
+    Layer parseGerberOrDrill(const QByteArray &bytes, const QString &relativePath, QString &parseError);
 
     ArchivePanel *panelA_;
     ArchivePanel *panelB_;

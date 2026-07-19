@@ -116,3 +116,13 @@ add_executable(test_gerberparser
 target_include_directories(test_gerberparser PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_gerberparser PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_gerberparser COMMAND test_gerberparser)
+
+add_executable(test_excellonparser
+    test_excellonparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/excellonparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberformat.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberaperture.cpp
+)
+target_include_directories(test_excellonparser PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_excellonparser PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME test_excellonparser COMMAND test_excellonparser)

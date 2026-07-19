@@ -16,10 +16,11 @@ private slots:
     void neitherSideGerberType();
     void emptyInputProducesEmptyOutput();
 
-    void drillSideExcludesFromEligible();
-    void drillPairsBucketsDrillSide();
+    void bothSidesDrillFilesAreEligible();
+    void mixedDrillAndGerberSideExcludesFromEligible();
+    void drillPairsBucketsOnlyMixedDrillPairs();
     void unrecognizedPairsBucketsNonDrillUnrecognized();
-    void drillTakesPriorityOverUnrecognized();
+    void mixedDrillTakesPriorityOverUnrecognized();
 };
 
 void TestGerberDiffTrigger::bothSidesRecognizedGerberType()
@@ -56,23 +57,34 @@ void TestGerberDiffTrigger::emptyInputProducesEmptyOutput()
     QCOMPARE(eligible.size(), 0);
 }
 
-void TestGerberDiffTrigger::drillSideExcludesFromEligible()
+void TestGerberDiffTrigger::bothSidesDrillFilesAreEligible()
 {
     const QVector<DifferingPair> pairs = {{"board.drl", "board.drl"}};
+
+    const QVector<DifferingPair> eligible = GerberDiffTrigger::eligiblePairs(pairs);
+
+    QCOMPARE(eligible.size(), 1);
+}
+
+void TestGerberDiffTrigger::mixedDrillAndGerberSideExcludesFromEligible()
+{
+    const QVector<DifferingPair> pairs = {{"board.drl", "top.gtl"}};
 
     const QVector<DifferingPair> eligible = GerberDiffTrigger::eligiblePairs(pairs);
 
     QCOMPARE(eligible.size(), 0);
 }
 
-void TestGerberDiffTrigger::drillPairsBucketsDrillSide()
+void TestGerberDiffTrigger::drillPairsBucketsOnlyMixedDrillPairs()
 {
-    const QVector<DifferingPair> pairs = {{"board.drl", "board.drl"}, {"top.gtl", "top.gtl"}};
+    const QVector<DifferingPair> pairs = {
+        {"board.drl", "top.gtl"}, {"board.drl", "board.drl"}, {"top.gtl", "top.gtl"}};
 
     const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(pairs);
 
     QCOMPARE(drill.size(), 1);
     QCOMPARE(drill.first().relativePathA, QString("board.drl"));
+    QCOMPARE(drill.first().relativePathB, QString("top.gtl"));
 }
 
 void TestGerberDiffTrigger::unrecognizedPairsBucketsNonDrillUnrecognized()
@@ -85,11 +97,11 @@ void TestGerberDiffTrigger::unrecognizedPairsBucketsNonDrillUnrecognized()
     QCOMPARE(unrecognized.first().relativePathB, QString("notes.docx"));
 }
 
-void TestGerberDiffTrigger::drillTakesPriorityOverUnrecognized()
+void TestGerberDiffTrigger::mixedDrillTakesPriorityOverUnrecognized()
 {
     // One side is a drill file, the other an unrecognized extension: an
-    // Add-extension button could never make this renderable in M4, so it
-    // must land in drillPairs, not unrecognizedPairs.
+    // Add-extension button could never make this renderable, so it must
+    // land in drillPairs, not unrecognizedPairs.
     const QVector<DifferingPair> pairs = {{"board.drl", "board.foobar"}};
 
     QCOMPARE(GerberDiffTrigger::drillPairs(pairs).size(), 1);
