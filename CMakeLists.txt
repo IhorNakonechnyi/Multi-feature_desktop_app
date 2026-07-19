@@ -112,6 +112,8 @@ add_executable(PcbSupplierWorkflow
     src/gerber/gerberobjectpaths.cpp
     src/gerber/gerberparser.h
     src/gerber/gerberparser.cpp
+    src/gerber/excellonparser.h
+    src/gerber/excellonparser.cpp
     src/gerber/layermask.h
     src/gerber/layermaskrenderer.h
     src/gerber/layermaskrenderer.cpp

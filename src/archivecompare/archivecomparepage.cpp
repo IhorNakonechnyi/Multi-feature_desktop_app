@@ -14,6 +14,7 @@
 #include "../gerber/gerberfiletype.h"
 #include "../gerber/gerberobjectpaths.h"
 #include "../gerber/gerberparser.h"
+#include "../gerber/excellonparser.h"
 #include "../gerber/layermaskrenderer.h"
 #include "../gerber/maskcompositor.h"
 #include "archivepanel.h"
@@ -248,6 +249,32 @@ void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unr
     }
 }
 
+// Picks GerberParser or ExcellonParser by the entry's own file extension
+// (GerberFileType::isDrillFile) - see the M5 design doc, section 2. An
+// empty `bytes` (read failure, already handled independently per side by
+// the caller) produces an empty Layer with no error. An ExcellonParser
+// ambiguous-coordinate-format failure is caught here and reported via
+// `parseError` instead of propagating, mirroring how a read failure is
+// already just an empty Layer rather than a thrown exception at this
+// layer - one file's problem must never abort rendering the other side.
+Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, const QString &relativePath,
+                                              QString &parseError)
+{
+    if (bytes.isEmpty()) {
+        return Layer{};
+    }
+    const QString content = QString::fromUtf8(bytes);
+    if (!GerberFileType::isDrillFile(relativePath)) {
+        return GerberParser::parseContentToObjects(content);
+    }
+    try {
+        return ExcellonParser::parseContentToObjects(content);
+    } catch (const ExcellonParser::AmbiguousFormatError &error) {
+        parseError = error.message();
+        return Layer{};
+    }
+}
+
 void ArchiveComparePage::showSelectedPair()
 {
     const int row = gerberPairList_->currentRow();
@@ -259,31 +286,39 @@ void ArchiveComparePage::showSelectedPair()
     const QByteArray bytesA = ArchiveReader::readEntryBytes(panelA_->archivePath(), pair.relativePathA);
     const QByteArray bytesB = ArchiveReader::readEntryBytes(panelB_->archivePath(), pair.relativePathB);
 
-    shownLayerA_ = bytesA.isEmpty() ? Layer{} : GerberParser::parseContentToObjects(QString::fromUtf8(bytesA));
-    shownLayerB_ = bytesB.isEmpty() ? Layer{} : GerberParser::parseContentToObjects(QString::fromUtf8(bytesB));
+    QString parseErrorA;
+    QString parseErrorB;
+    shownLayerA_ = parseGerberOrDrill(bytesA, pair.relativePathA, parseErrorA);
+    shownLayerB_ = parseGerberOrDrill(bytesB, pair.relativePathB, parseErrorB);
 
-    // Each side is judged independently: an empty-but-readable file (or a
-    // read failure - bytes.isEmpty() covers both, ArchiveReader::
-    // readEntryBytes never throws) parses to a Layer with no objects,
-    // which GerberObjectPaths::layerBoundsMm correctly reports as empty
-    // bounds either way.
+    // Each side is judged independently: an empty-but-readable file, a read
+    // failure, or a parse failure (parseErrorX set) all leave that side's
+    // Layer empty, which GerberObjectPaths::layerBoundsMm correctly
+    // reports as empty bounds either way - the difference is only in which
+    // status text explains why.
     const QRectF boundsA = GerberObjectPaths::layerBoundsMm(shownLayerA_);
     const QRectF boundsB = GerberObjectPaths::layerBoundsMm(shownLayerB_);
     const QRectF unitedBounds = boundsA.united(boundsB);
 
-    if (unitedBounds.isEmpty()) {
-        pairStatusLabel_->setText(tr("Neither side has drawable Gerber content."));
-        gerberCanvas_->setComposite(QImage(), QRectF());
-        return;
-    }
-    if (boundsA.isEmpty()) {
-        pairStatusLabel_->setText(tr("A side: no drawable Gerber content - showing old file only."));
+    if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
+        pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2").arg(parseErrorA, parseErrorB));
+    } else if (!parseErrorA.isEmpty()) {
+        pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing old file only.").arg(parseErrorA));
+    } else if (!parseErrorB.isEmpty()) {
+        pairStatusLabel_->setText(tr("B side failed to parse: %1 - showing new file only.").arg(parseErrorB));
+    } else if (unitedBounds.isEmpty()) {
+        pairStatusLabel_->setText(tr("Neither side has drawable content."));
+    } else if (boundsA.isEmpty()) {
+        pairStatusLabel_->setText(tr("A side: no drawable content - showing old file only."));
     } else if (boundsB.isEmpty()) {
-        pairStatusLabel_->setText(tr("B side: no drawable Gerber content - showing new file only."));
+        pairStatusLabel_->setText(tr("B side: no drawable content - showing new file only."));
     } else {
         pairStatusLabel_->clear();
     }
 
+    if (unitedBounds.isEmpty()) {
+        return;
+    }
     gerberCanvas_->fitTo(unitedBounds); // emits renderRequested -> renderShownPair
 }
 
