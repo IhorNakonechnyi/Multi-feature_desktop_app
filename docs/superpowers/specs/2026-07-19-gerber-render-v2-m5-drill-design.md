@@ -77,10 +77,17 @@ Applied per-file, once, before parsing the body:
 - `T##` (on its own line in the body) selects the current tool.
 - A bare `X#Y#` (or `X#` / `Y#` reusing the other axis's last value) while in drill mode (the
   default, or after `G05`) emits a **Flash** at that coordinate with the current tool's diameter.
-- `G00`/`G01` in the body switches to **rout mode**: the next coordinate is a linear move from the
-  last position, emitted as a **Stroke** (round-cap, current tool diameter).
-- `G02`/`G03` in rout mode are clockwise/counterclockwise **Arc** moves — same arc primitive
-  `GerberParser` already emits for circular interpolation.
+- `G00` is a **rapid positioning move only** — it updates the current point but never draws
+  (matches the real Excellon convention; treating it as a cut would draw a phantom slot line on
+  every ordinary rapid reposition between operations, corrupting the render on essentially every
+  real file). `G00` also switches to **rout mode**, so the app that reads it knows the coordinate
+  that follows is a rout-mode positioning move, not a drill-mode plunge.
+- `M15` ("tool down") marks the start of an actual cut: from here until the matching `M16`, each
+  `G01`/`G02`/`G03` move is emitted as a **Stroke** (linear or, for `G02`/`G03`, an **Arc** — same
+  arc primitive `GerberParser` already emits for circular interpolation, resolved the same way via
+  I/J offsets from the move's start point) at the current tool's diameter.
+- `M16` ("tool up") ends the cut; subsequent `G01`/`G02`/`G03` moves (if any, before the next `M15`
+  or `G05`) draw nothing.
 - `G05` returns to drill mode.
 - `M30` (end of program), `M00` — stop parsing; anything after is ignored, matching how trailing
   garbage after Gerber's `M02` is already handled.
@@ -119,9 +126,10 @@ Unit (QtTest, constitution rule 4 — core logic only), mirroring `test_gerberpa
 
 - `ExcellonParser`: explicit-decimal holes; zero-suppressed coordinates for each of
   INCH×LZ, INCH×TZ, METRIC×LZ, METRIC×TZ; an explicit `;FILE_FORMAT=` comment overriding the
-  unit-line default; tool table parsing (diameter lookup by tool number); rout-mode linear slots;
-  rout-mode arc slots (both directions); the ambiguous-format error case; empty-body / header-only
-  file.
+  unit-line default; tool table parsing (diameter lookup by tool number); a `G00` rapid move
+  between an `M16` and the next `M15` draws nothing (only positions); an `M15`...`G01`...`M16`
+  span draws exactly one linear slot; rout-mode arc slots (both directions) between `M15`/`M16`;
+  the ambiguous-format error case; empty-body / header-only file.
 - `GerberDiffTrigger`: a drill-drill pair is eligible; a drill/non-drill mixed pair is not.
 - `GerberFileType::isDrillFile()` coverage already exists (M4) — unchanged.
 
