@@ -19,10 +19,11 @@ private slots:
     void partialSubfolderMove();
     void buriedSubtreePlusUnrelatedNoise();
     void duplicateClassificationPropagates();
-    void ambiguousDuplicateLeftUnmatched();
+    void secondSameNameEntryIgnoredEvenWhenFirstMatchesViaFallback();
     void selfNestedDuplicateIgnoredWithoutCounterpart();
     void firstOccurrenceStillFlaggedWhenTrulyMissing();
-    void sameNameDifferentCrcNotTreatedAsSelfDuplicate();
+    void sameNameDifferentCrcStillTreatedAsSelfDuplicate();
+    void realChangeSurfacesDespiteStaleNestedDuplicate();
     void differingPairFromExactPathMatch();
     void differingPairFromFilenameFallback();
     void noDifferingPairForIdenticalOrOnlyInOne();
@@ -149,10 +150,16 @@ void TestArchiveComparator::duplicateClassificationPropagates()
     QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Identical));
 }
 
-// Same filename, different content, in multiple folders on one side - the
-// tool must not guess which one pairs with the single same-named file on
-// the other side, so all copies stay OnlyInThisArchive.
-void TestArchiveComparator::ambiguousDuplicateLeftUnmatched()
+// Same filename, different content, in two folders on one side - the
+// second occurrence is now unconditionally treated as a duplicate of the
+// first (per the filename-only dedup rule), so it never reaches Pass 2 at
+// all; only the first (canonical) copy is a real candidate, and it matches
+// B's single same-named file normally via the filename fallback. This
+// replaces the old "leave both unmatched, ambiguous" behavior - a
+// consequence of the dedup rule keying on filename alone (see
+// selfDuplicateIndices), confirmed as the intended behavior against a real
+// supplier archive that needed it.
+void TestArchiveComparator::secondSameNameEntryIgnoredEvenWhenFirstMatchesViaFallback()
 {
     const QVector<ArchiveReader::RawFileEntry> a = {
         {"folder1/conflict.txt", 100, 10}, {"folder2/conflict.txt", 200, 10}};
@@ -161,12 +168,10 @@ void TestArchiveComparator::ambiguousDuplicateLeftUnmatched()
     const ArchiveComparisonResult result = CrcComparator::compare(a, b);
 
     QCOMPARE(result.entriesA.size(), 2);
-    QCOMPARE(static_cast<int>(result.entriesA[0].classification),
-             static_cast<int>(EntryClassification::OnlyInThisArchive));
-    QCOMPARE(static_cast<int>(result.entriesA[1].classification),
-             static_cast<int>(EntryClassification::OnlyInThisArchive));
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
     QCOMPARE(static_cast<int>(result.entriesB[0].classification),
-             static_cast<int>(EntryClassification::OnlyInThisArchive));
+             static_cast<int>(EntryClassification::Identical));
 }
 
 // A file accidentally re-embedded inside its own archive (e.g. a nested zip
@@ -211,10 +216,18 @@ void TestArchiveComparator::firstOccurrenceStillFlaggedWhenTrulyMissing()
     QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
 }
 
-// Same filename appearing twice with different CRCs is coincidence, not a
-// duplicate - the self-nested-duplicate rule must not suppress it. Both
-// stay OnlyInThisArchive when neither has a counterpart on the other side.
-void TestArchiveComparator::sameNameDifferentCrcNotTreatedAsSelfDuplicate()
+// A real archive can contain a nested self-copy that is NOT byte-identical
+// to the top-level file it duplicates - e.g. a stale leftover of an older
+// revision, accidentally left inside a re-zipped folder. The dedup rule
+// must key on filename ALONE, not (filename, crc): "this name already
+// appeared in this archive" is what makes something an accidental
+// duplicate to ignore, regardless of whether its content happens to also
+// match. Content is irrelevant to *whether* something is a duplicate - it
+// only matters for the canonical (first) copy's actual comparison against
+// the other archive. Confirmed against a real supplier archive pair that
+// exposed this exact shape (differing-content duplicate) after the
+// filename+crc version of this rule shipped.
+void TestArchiveComparator::sameNameDifferentCrcStillTreatedAsSelfDuplicate()
 {
     const QVector<ArchiveReader::RawFileEntry> a = {
         {"folder1/x.txt", 100, 10}, {"folder2/x.txt", 200, 10}};
@@ -225,8 +238,32 @@ void TestArchiveComparator::sameNameDifferentCrcNotTreatedAsSelfDuplicate()
     QCOMPARE(result.entriesA.size(), 2);
     QCOMPARE(static_cast<int>(result.entriesA[0].classification),
              static_cast<int>(EntryClassification::OnlyInThisArchive));
-    QCOMPARE(static_cast<int>(result.entriesA[1].classification),
-             static_cast<int>(EntryClassification::OnlyInThisArchive));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
+}
+
+// The production case the rule above guards: archive A's canonical file
+// genuinely changed since B; a stale nested duplicate of the OLD content
+// was accidentally left inside A too. Ignoring the duplicate (by filename
+// alone) must not just silence it - the canonical copy must still find
+// and correctly diff against B, rather than the duplicate's mismatched CRC
+// making the filename group look "ambiguous" and swallowing the real
+// change (the bug this test was written to catch).
+void TestArchiveComparator::realChangeSurfacesDespiteStaleNestedDuplicate()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {
+        {"changed.gbr", 100, 10}, {"backup.zip/changed.gbr", 200, 10}};
+    const QVector<ArchiveReader::RawFileEntry> b = {{"changed.gbr", 200, 10}};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(result.entriesA.size(), 2);
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification), static_cast<int>(EntryClassification::Different));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(result.entriesB.size(), 1);
+    QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Different));
+    QCOMPARE(result.differingPairs.size(), 1);
+    QCOMPARE(result.differingPairs[0].relativePathA, QLatin1String("changed.gbr"));
+    QCOMPARE(result.differingPairs[0].relativePathB, QLatin1String("changed.gbr"));
 }
 
 // Pass 1 (exact path match) with differing CRC must record a DifferingPair

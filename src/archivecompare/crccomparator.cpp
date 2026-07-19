@@ -40,23 +40,27 @@ DuplicateGroups groupByFilenameAndCrc(const QVector<RawFileEntry> &entries, cons
 }
 
 // Indices of entries that are an accidental extra copy of an earlier entry
-// in the *same* archive (same filename, same CRC - e.g. a nested zip that
-// re-embeds files already present elsewhere in the same archive, "archive
-// contains a copy of itself"). First-seen-wins: only the 2nd+ occurrence of
-// a given (filename, crc) pair counts as a duplicate, so a file genuinely
-// absent from the other archive still surfaces once via its first
-// occurrence.
+// in the *same* archive (same filename anywhere in the archive - e.g. a
+// nested zip that re-embeds files already present elsewhere in the same
+// archive, "archive contains a copy of itself"). Keyed on filename ALONE,
+// not (filename, crc): a real archive's nested self-copy can be a stale
+// leftover of an older revision, so its content may genuinely differ from
+// the current top-level file it duplicates. Content only matters for the
+// canonical (first) copy's actual comparison against the other archive -
+// whether something IS a duplicate depends only on "this name already
+// appeared in this archive". First-seen-wins: only the 2nd+ occurrence of
+// a given filename counts as a duplicate, so a file genuinely absent from
+// the other archive still surfaces once via its first occurrence.
 QSet<int> selfDuplicateIndices(const QVector<RawFileEntry> &entries)
 {
-    QHash<QString, QSet<quint32>> seenCrcsByFilename;
+    QSet<QString> seenFilenames;
     QSet<int> duplicates;
     for (int i = 0; i < entries.size(); ++i) {
-        const RawFileEntry &entry = entries.at(i);
-        QSet<quint32> &seenCrcs = seenCrcsByFilename[filenameOf(entry.relativePath)];
-        if (seenCrcs.contains(entry.crc32)) {
+        const QString filename = filenameOf(entries.at(i).relativePath);
+        if (seenFilenames.contains(filename)) {
             duplicates.insert(i);
         } else {
-            seenCrcs.insert(entry.crc32);
+            seenFilenames.insert(filename);
         }
     }
     return duplicates;
