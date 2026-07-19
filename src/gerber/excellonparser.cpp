@@ -20,6 +20,10 @@ struct ExcellonState {
     // comment). Until then, every coordinate must carry an explicit
     // decimal point, which is this task's whole scope.
     bool hasResolvableFormat = false;
+    // True once a FILE_FORMAT comment set integer/decimalDigits directly -
+    // a later (or earlier) INCH/METRIC line's own digit-count defaults
+    // must not override it, regardless of which appears first in the file.
+    bool digitsExplicitlySet = false;
     QHash<int, GerberAperture> apertures; // tool number -> Circle aperture (diameter in mm)
     int currentTool = -1;
     PointNm currentPoint;
@@ -108,6 +112,64 @@ ToolLine parseToolLine(const QString &line)
     return result;
 }
 
+// ";FILE_FORMAT=2:4" (a vendor convention naming integer:decimal digit
+// counts directly) is the highest-priority format source - an explicit
+// declaration beats any default. Returns true if `line` was one of these
+// comments and `state` was updated.
+bool tryParseFileFormatComment(const QString &line, ExcellonState &state)
+{
+    const QString marker = QStringLiteral("FILE_FORMAT=");
+    const int markerIndex = line.indexOf(marker, 0, Qt::CaseInsensitive);
+    if (markerIndex < 0) {
+        return false;
+    }
+    const QString spec = line.mid(markerIndex + marker.length());
+    const int colonIndex = spec.indexOf(QLatin1Char(':'));
+    if (colonIndex < 0) {
+        return false;
+    }
+    bool integerOk = false;
+    bool decimalOk = false;
+    const int integerDigits = spec.left(colonIndex).toInt(&integerOk);
+    const int decimalDigits = spec.mid(colonIndex + 1).toInt(&decimalOk);
+    if (!integerOk || !decimalOk) {
+        return false;
+    }
+    state.format.integerDigits = integerDigits;
+    state.format.decimalDigits = decimalDigits;
+    state.digitsExplicitlySet = true;
+    state.hasResolvableFormat = true;
+    return true;
+}
+
+// "INCH,TZ" / "METRIC,LZ,000.000" / a bare "INCH" or "METRIC" - the
+// header's unit declaration, optionally followed by a zero-suppression
+// mode. Sets the public-spec default digit counts (2:4 for INCH, 3:3 for
+// METRIC) unless a FILE_FORMAT comment already set them explicitly (see
+// digitsExplicitlySet - checked regardless of which line came first in the
+// file). LZ/TZ mapping: this parser treats the header's own 'L'/'T' letter
+// the same way Gerber's %FS flag does (L = leading zero omitted),
+// defaulting to L when neither is present - real-world Excellon tooling is
+// not fully consistent on this exact point, so this is a documented
+// best-effort default; the M5.4/M5.5 visual gate against real supplier
+// files is the actual correctness check, not this comment.
+bool tryParseUnitsLine(const QString &line, ExcellonState &state)
+{
+    const bool isInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);
+    const bool isMetric = line.startsWith(QLatin1String("METRIC"), Qt::CaseInsensitive);
+    if (!isInch && !isMetric) {
+        return false;
+    }
+    state.format.unitsAreInches = isInch;
+    if (!state.digitsExplicitlySet) {
+        state.format.integerDigits = isInch ? 2 : 3;
+        state.format.decimalDigits = isInch ? 4 : 3;
+    }
+    state.format.leadingZeroOmitted = !line.contains(QLatin1String("TZ"), Qt::CaseInsensitive);
+    state.hasResolvableFormat = true;
+    return true;
+}
+
 void emitFlash(ExcellonState &state)
 {
     GraphicObject object;
@@ -124,27 +186,31 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
 {
     ExcellonState state;
     const QStringList lines = content.split(QLatin1Char('\n'));
+    bool headerDone = false;
 
     for (const QString &rawLine : lines) {
         const QString line = rawLine.trimmed();
-        if (line.isEmpty() || line.startsWith(QLatin1Char(';'))) {
+        if (line.isEmpty()) {
             continue;
         }
-        if (line.compare(QLatin1String("M48"), Qt::CaseInsensitive) == 0 || line == QLatin1String("%")
-            || line.compare(QLatin1String("M95"), Qt::CaseInsensitive) == 0) {
+        if (line.startsWith(QLatin1Char(';'))) {
+            tryParseFileFormatComment(line, state); // no-op if not that comment
             continue;
         }
-        if (line.compare(QLatin1String("METRIC"), Qt::CaseInsensitive) == 0) {
-            state.format.unitsAreInches = false;
+        if (line.compare(QLatin1String("M48"), Qt::CaseInsensitive) == 0) {
             continue;
         }
-        if (line.compare(QLatin1String("INCH"), Qt::CaseInsensitive) == 0) {
-            state.format.unitsAreInches = true;
+        if (line == QLatin1String("%") || line.compare(QLatin1String("M95"), Qt::CaseInsensitive) == 0) {
+            headerDone = true;
             continue;
         }
         if (line.compare(QLatin1String("M30"), Qt::CaseInsensitive) == 0
             || line.compare(QLatin1String("M00"), Qt::CaseInsensitive) == 0) {
             break;
+        }
+
+        if (!headerDone && tryParseUnitsLine(line, state)) {
+            continue;
         }
 
         const ToolLine tool = parseToolLine(line);
