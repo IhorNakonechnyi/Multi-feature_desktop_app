@@ -239,12 +239,12 @@ void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unr
     if (drill.isEmpty()) {
         skippedDrillLabel_->setVisible(false);
     } else {
-        // No button: an unrecognized extension can be taught to the app,
-        // but this app's Gerber parser genuinely cannot read Excellon
-        // drill files yet (M5 in the design doc) - nothing the user clicks
-        // here would help.
+        // No button: these are mixed pairs (one side drill, one side non-drill).
+        // The app can read Excellon drill files (M5 complete), but comparing
+        // a drill file's holes against a copper Gerber layer's traces is
+        // structurally meaningless - nothing the user clicks here would help.
         skippedDrillLabel_->setText(
-            tr("%1 drill file pair(s) skipped - drill compare comes in a later version.").arg(drill.size()));
+            tr("%1 mixed drill/Gerber pair(s) skipped - drill files cannot be compared with non-drill layers.").arg(drill.size()));
         skippedDrillLabel_->setVisible(true);
     }
 }
