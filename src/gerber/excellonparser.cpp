@@ -136,12 +136,10 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
         }
         if (line.compare(QLatin1String("METRIC"), Qt::CaseInsensitive) == 0) {
             state.format.unitsAreInches = false;
-            state.hasResolvableFormat = true;
             continue;
         }
         if (line.compare(QLatin1String("INCH"), Qt::CaseInsensitive) == 0) {
             state.format.unitsAreInches = true;
-            state.hasResolvableFormat = true;
             continue;
         }
         if (line.compare(QLatin1String("M30"), Qt::CaseInsensitive) == 0

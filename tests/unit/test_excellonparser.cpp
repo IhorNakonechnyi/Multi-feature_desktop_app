@@ -12,6 +12,7 @@ private slots:
     void toolTableDiameterConvertedFromInches();
     void secondToolSelectionSwitchesApertureForSubsequentHoles();
     void nonDecimalCoordinateWithNoFormatInfoThrows();
+    void nonDecimalCoordinateStillThrowsEvenWithUnitsLinePresent();
     void headerOnlyFileProducesNoObjects();
 };
 
@@ -97,6 +98,23 @@ void TestExcellonParser::nonDecimalCoordinateWithNoFormatInfoThrows()
 {
     const QString content =
         "M48\n"
+        "T01C0.300\n"
+        "%\n"
+        "T01\n"
+        "X015000Y015000\n"
+        "M30\n";
+
+    QVERIFY_EXCEPTION_THROWN(ExcellonParser::parseContentToObjects(content), ExcellonParser::AmbiguousFormatError);
+}
+
+void TestExcellonParser::nonDecimalCoordinateStillThrowsEvenWithUnitsLinePresent()
+{
+    // Regression test: non-decimal coordinates must throw AmbiguousFormatError
+    // even when a METRIC or INCH header line is present. Task 1's scope is
+    // explicit-decimal coordinates only; zero-suppression resolution is Task 2.
+    const QString content =
+        "M48\n"
+        "METRIC\n"
         "T01C0.300\n"
         "%\n"
         "T01\n"
