@@ -13,28 +13,21 @@ namespace {
 
 using ExcellonParser::AmbiguousFormatError;
 
+enum class RoutInterpolation { Linear, ClockwiseArc, CounterClockwiseArc };
+
 struct ExcellonState {
     GerberFormat format;
-    // True once a usable zero-suppression digit format is known (Task 2
-    // adds how that gets set - INCH/METRIC header line or a FILE_FORMAT
-    // comment). Until then, every coordinate must carry an explicit
-    // decimal point, which is this task's whole scope.
     bool hasResolvableFormat = false;
-    // True once a FILE_FORMAT comment set integer/decimalDigits directly -
-    // a later (or earlier) INCH/METRIC line's own digit-count defaults
-    // must not override it, regardless of which appears first in the file.
     bool digitsExplicitlySet = false;
     QHash<int, GerberAperture> apertures; // tool number -> Circle aperture (diameter in mm)
     int currentTool = -1;
     PointNm currentPoint;
+    bool routMode = false; // true after G00, until G05 returns to drill mode
+    bool cutting = false;  // true between M15 (tool down) and M16 (tool up)
+    RoutInterpolation routInterpolation = RoutInterpolation::Linear;
     QVector<GraphicObject> objects;
 };
 
-// Finds where a field's numeric text ends: the next uppercase letter at or
-// after `start`, or the string's end. Mirrors GerberParser's own
-// nextUppercaseIndex (gerberparser.cpp) - duplicated rather than shared,
-// since this is a small, self-contained per-parser utility and the two
-// parsers don't otherwise share an implementation file.
 int nextFieldIndex(const QString &text, int start)
 {
     for (int i = start; i < text.length(); ++i) {
@@ -45,13 +38,6 @@ int nextFieldIndex(const QString &text, int start)
     return text.length();
 }
 
-// A coordinate token with an explicit decimal point (e.g. "1.5") is used
-// directly, in the file's current units - it needs no zero-suppression
-// digit-count/LZ-TZ resolution at all. A token with no decimal point (e.g.
-// "015000") needs GerberFormat::decodeCoordinateMm's zero-suppression
-// logic, which is only valid once state.hasResolvableFormat is true; until
-// then it's a genuine ambiguity - the file gives no way to know how many
-// implied decimal places it has.
 double resolveCoordinateMm(const QString &token, const ExcellonState &state)
 {
     if (token.contains(QLatin1Char('.'))) {
@@ -67,12 +53,16 @@ double resolveCoordinateMm(const QString &token, const ExcellonState &state)
     return state.format.decodeCoordinateMm(token);
 }
 
-// Decodes an "X..Y.." token (only the axes actually present are updated,
-// same convention as GerberParser::applyCoordinateToken) into `point`.
-void applyCoordinateToken(const QString &token, ExcellonState &state, PointNm &point)
+// Decodes whichever of X/Y/I/J fields are present in `token` into `point`
+// (X/Y) or `offset` (I/J) - only the fields actually present are touched.
+// I/J are only meaningful for an arc move; drill/linear-move callers pass
+// a throwaway offset they never read.
+void applyFields(const QString &token, ExcellonState &state, PointNm &point, PointNm &offset)
 {
     const int xIndex = token.indexOf(QLatin1Char('X'));
     const int yIndex = token.indexOf(QLatin1Char('Y'));
+    const int iIndex = token.indexOf(QLatin1Char('I'));
+    const int jIndex = token.indexOf(QLatin1Char('J'));
     if (xIndex >= 0) {
         const int end = nextFieldIndex(token, xIndex + 1);
         point.x = GerberFormat::mmToNm(resolveCoordinateMm(token.mid(xIndex + 1, end - xIndex - 1), state));
@@ -81,12 +71,16 @@ void applyCoordinateToken(const QString &token, ExcellonState &state, PointNm &p
         const int end = nextFieldIndex(token, yIndex + 1);
         point.y = GerberFormat::mmToNm(resolveCoordinateMm(token.mid(yIndex + 1, end - yIndex - 1), state));
     }
+    if (iIndex >= 0) {
+        const int end = nextFieldIndex(token, iIndex + 1);
+        offset.x = GerberFormat::mmToNm(resolveCoordinateMm(token.mid(iIndex + 1, end - iIndex - 1), state));
+    }
+    if (jIndex >= 0) {
+        const int end = nextFieldIndex(token, jIndex + 1);
+        offset.y = GerberFormat::mmToNm(resolveCoordinateMm(token.mid(jIndex + 1, end - jIndex - 1), state));
+    }
 }
 
-// "T01C0.0135" (tool table entry: number + diameter) vs. "T01" (tool
-// selection: number only) - both start the same way, so this returns the
-// tool number and, only for a table entry, the diameter text after 'C'
-// (empty QString for a bare selection).
 struct ToolLine {
     bool isToolLine = false;
     int number = -1;
@@ -112,10 +106,73 @@ ToolLine parseToolLine(const QString &line)
     return result;
 }
 
-// ";FILE_FORMAT=2:4" (a vendor convention naming integer:decimal digit
-// counts directly) is the highest-priority format source - an explicit
-// declaration beats any default. Returns true if `line` was one of these
-// comments and `state` was updated.
+void emitFlash(ExcellonState &state)
+{
+    GraphicObject object;
+    object.type = ObjectType::Flash;
+    object.polarity = Polarity::Dark;
+    object.apertureCode = state.currentTool;
+    object.position = state.currentPoint;
+    state.objects.append(object);
+}
+
+void applyCoordinateTokenAndFlash(const QString &token, ExcellonState &state)
+{
+    PointNm offset{0, 0}; // unused for a plain drill hit
+    applyFields(token, state, state.currentPoint, offset);
+    emitFlash(state);
+}
+
+void emitLinearStroke(ExcellonState &state, PointNm from, PointNm to)
+{
+    GraphicObject object;
+    object.type = ObjectType::Stroke;
+    object.polarity = Polarity::Dark;
+    object.apertureCode = state.currentTool;
+    object.position = from;
+    object.strokeTo = to;
+    object.isArc = false;
+    state.objects.append(object);
+}
+
+void emitArcStroke(ExcellonState &state, PointNm from, PointNm to, PointNm center, bool counterClockwise)
+{
+    GraphicObject object;
+    object.type = ObjectType::Stroke;
+    object.polarity = Polarity::Dark;
+    object.apertureCode = state.currentTool;
+    object.position = from;
+    object.strokeTo = to;
+    object.isArc = true;
+    object.arcCenter = center;
+    object.arcCounterClockwise = counterClockwise;
+    state.objects.append(object);
+}
+
+// Applies one rout-mode move (a G01/G02/G03 cut, or the modal reuse of the
+// last one on a bare coordinate line) described by `afterGCode` (the G0n
+// prefix, if any, already stripped by the caller). Only draws when
+// state.cutting is true (i.e. inside an M15..M16 span) - per the design
+// doc's correction, a move outside that span only repositions.
+void applyRoutMove(const QString &afterGCode, ExcellonState &state)
+{
+    const PointNm from = state.currentPoint;
+    PointNm to = from;
+    PointNm offset{0, 0};
+    applyFields(afterGCode, state, to, offset);
+
+    if (state.cutting) {
+        if (state.routInterpolation == RoutInterpolation::Linear) {
+            emitLinearStroke(state, from, to);
+        } else {
+            const PointNm center{from.x + offset.x, from.y + offset.y};
+            const bool counterClockwise = state.routInterpolation == RoutInterpolation::CounterClockwiseArc;
+            emitArcStroke(state, from, to, center, counterClockwise);
+        }
+    }
+    state.currentPoint = to;
+}
+
 bool tryParseFileFormatComment(const QString &line, ExcellonState &state)
 {
     const QString marker = QStringLiteral("FILE_FORMAT=");
@@ -142,17 +199,6 @@ bool tryParseFileFormatComment(const QString &line, ExcellonState &state)
     return true;
 }
 
-// "INCH,TZ" / "METRIC,LZ,000.000" / a bare "INCH" or "METRIC" - the
-// header's unit declaration, optionally followed by a zero-suppression
-// mode. Sets the public-spec default digit counts (2:4 for INCH, 3:3 for
-// METRIC) unless a FILE_FORMAT comment already set them explicitly (see
-// digitsExplicitlySet - checked regardless of which line came first in the
-// file). LZ/TZ mapping: this parser treats the header's own 'L'/'T' letter
-// the same way Gerber's %FS flag does (L = leading zero omitted),
-// defaulting to L when neither is present - real-world Excellon tooling is
-// not fully consistent on this exact point, so this is a documented
-// best-effort default; the M5.4/M5.5 visual gate against real supplier
-// files is the actual correctness check, not this comment.
 bool tryParseUnitsLine(const QString &line, ExcellonState &state)
 {
     const bool isInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);
@@ -170,16 +216,6 @@ bool tryParseUnitsLine(const QString &line, ExcellonState &state)
     return true;
 }
 
-void emitFlash(ExcellonState &state)
-{
-    GraphicObject object;
-    object.type = ObjectType::Flash;
-    object.polarity = Polarity::Dark;
-    object.apertureCode = state.currentTool;
-    object.position = state.currentPoint;
-    state.objects.append(object);
-}
-
 } // namespace
 
 Layer ExcellonParser::parseContentToObjects(const QString &content)
@@ -194,7 +230,7 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
             continue;
         }
         if (line.startsWith(QLatin1Char(';'))) {
-            tryParseFileFormatComment(line, state); // no-op if not that comment
+            tryParseFileFormatComment(line, state);
             continue;
         }
         if (line.compare(QLatin1String("M48"), Qt::CaseInsensitive) == 0) {
@@ -208,17 +244,47 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
             || line.compare(QLatin1String("M00"), Qt::CaseInsensitive) == 0) {
             break;
         }
-
+        if (line.compare(QLatin1String("M15"), Qt::CaseInsensitive) == 0) {
+            state.cutting = true;
+            continue;
+        }
+        if (line.compare(QLatin1String("M16"), Qt::CaseInsensitive) == 0) {
+            state.cutting = false;
+            continue;
+        }
+        if (line.compare(QLatin1String("G05"), Qt::CaseInsensitive) == 0) {
+            state.routMode = false;
+            state.cutting = false;
+            continue;
+        }
         if (!headerDone && tryParseUnitsLine(line, state)) {
+            continue;
+        }
+        if (line.startsWith(QLatin1String("G00"), Qt::CaseInsensitive)) {
+            state.routMode = true;
+            state.cutting = false; // G00 is a rapid reposition only, never a cut
+            PointNm offset{0, 0};  // G00 never carries I/J
+            applyFields(line.mid(3), state, state.currentPoint, offset);
+            continue;
+        }
+        if (line.startsWith(QLatin1String("G01"), Qt::CaseInsensitive)) {
+            state.routInterpolation = RoutInterpolation::Linear;
+            applyRoutMove(line.mid(3), state);
+            continue;
+        }
+        if (line.startsWith(QLatin1String("G02"), Qt::CaseInsensitive)) {
+            state.routInterpolation = RoutInterpolation::ClockwiseArc;
+            applyRoutMove(line.mid(3), state);
+            continue;
+        }
+        if (line.startsWith(QLatin1String("G03"), Qt::CaseInsensitive)) {
+            state.routInterpolation = RoutInterpolation::CounterClockwiseArc;
+            applyRoutMove(line.mid(3), state);
             continue;
         }
 
         const ToolLine tool = parseToolLine(line);
         if (tool.isToolLine && !tool.diameterText.isEmpty()) {
-            // Tool table entry: diameter is a plain decimal in the file's
-            // current unit, same as a Gerber aperture modifier - not
-            // subject to coordinate zero-suppression at all (real files
-            // always write it with an explicit decimal point).
             const double diameterMm =
                 state.format.unitsAreInches ? tool.diameterText.toDouble() * 25.4 : tool.diameterText.toDouble();
             GerberAperture aperture;
@@ -233,8 +299,14 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
         }
 
         if (line.contains(QLatin1Char('X')) || line.contains(QLatin1Char('Y'))) {
-            applyCoordinateToken(line, state, state.currentPoint);
-            emitFlash(state);
+            if (state.routMode) {
+                // Modal reuse of the last-set G01/G02/G03 interpolation
+                // mode - real files routinely give one G-code then several
+                // bare coordinate lines for a multi-segment slot.
+                applyRoutMove(line, state);
+            } else {
+                applyCoordinateTokenAndFlash(line, state);
+            }
         }
     }
 

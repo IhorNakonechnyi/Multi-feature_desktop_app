@@ -20,6 +20,12 @@ private slots:
     void inchTrailingZeroOmittedDecodesCorrectly();
     void fileFormatCommentOverridesUnitLineDigitDefaults();
     void stillThrowsWhenTrulyNoFormatInfoPresent();
+    void linearSlotBetweenM15AndM16ProducesOneStroke();
+    void rapidMoveBeforeM15DrawsNothing();
+    void clockwiseArcSlotProducesArcStroke();
+    void counterClockwiseArcSlotSetsCounterClockwiseFlag();
+    void modalCoordinateAfterG01ReusesLinearMode();
+    void drillHoleStillWorksAfterG05ReturnsToDrillMode();
 };
 
 void TestExcellonParser::explicitDecimalHoleProducesFlashAtRightPosition()
@@ -275,6 +281,153 @@ void TestExcellonParser::stillThrowsWhenTrulyNoFormatInfoPresent()
         "M30\n";
 
     QVERIFY_EXCEPTION_THROWN(ExcellonParser::parseContentToObjects(content), ExcellonParser::AmbiguousFormatError);
+}
+
+void TestExcellonParser::linearSlotBetweenM15AndM16ProducesOneStroke()
+{
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X0.000Y0.000\n"
+        "M15\n"
+        "G01X5.000Y0.000\n"
+        "M16\n"
+        "G05\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(static_cast<int>(layer.objects[0].type), static_cast<int>(ObjectType::Stroke));
+    QVERIFY(!layer.objects[0].isArc);
+    QCOMPARE(layer.objects[0].position.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].position.y, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].strokeTo.x, GerberFormat::mmToNm(5.0));
+    QCOMPARE(layer.objects[0].strokeTo.y, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].apertureCode, 1);
+}
+
+void TestExcellonParser::rapidMoveBeforeM15DrawsNothing()
+{
+    // Same file as the test above: exactly one object total proves the G00
+    // rapid reposition itself drew nothing - only the M15..M16 span did.
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X3.000Y3.000\n"
+        "M15\n"
+        "G01X8.000Y3.000\n"
+        "M16\n"
+        "G05\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects[0].position.x, GerberFormat::mmToNm(3.0));
+}
+
+void TestExcellonParser::clockwiseArcSlotProducesArcStroke()
+{
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X5.000Y0.000\n"
+        "M15\n"
+        "G02X0.000Y5.000I-5.000J0.000\n"
+        "M16\n"
+        "G05\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QVERIFY(layer.objects[0].isArc);
+    QVERIFY(!layer.objects[0].arcCounterClockwise);
+    QCOMPARE(layer.objects[0].arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].arcCenter.y, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].strokeTo.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects[0].strokeTo.y, GerberFormat::mmToNm(5.0));
+}
+
+void TestExcellonParser::counterClockwiseArcSlotSetsCounterClockwiseFlag()
+{
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X5.000Y0.000\n"
+        "M15\n"
+        "G03X0.000Y5.000I-5.000J0.000\n"
+        "M16\n"
+        "G05\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QVERIFY(layer.objects[0].isArc);
+    QVERIFY(layer.objects[0].arcCounterClockwise);
+}
+
+void TestExcellonParser::modalCoordinateAfterG01ReusesLinearMode()
+{
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X0.000Y0.000\n"
+        "M15\n"
+        "G01X1.000Y0.000\n"
+        "X2.000Y0.000\n" // no G-word - modal reuse of G01's linear mode
+        "M16\n"
+        "G05\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    QVERIFY(!layer.objects[0].isArc);
+    QCOMPARE(layer.objects[0].strokeTo.x, GerberFormat::mmToNm(1.0));
+    QVERIFY(!layer.objects[1].isArc);
+    QCOMPARE(layer.objects[1].position.x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(layer.objects[1].strokeTo.x, GerberFormat::mmToNm(2.0));
+}
+
+void TestExcellonParser::drillHoleStillWorksAfterG05ReturnsToDrillMode()
+{
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T01C0.500\n"
+        "%\n"
+        "T01\n"
+        "G00X0.000Y0.000\n"
+        "M15\n"
+        "G01X5.000Y0.000\n"
+        "M16\n"
+        "G05\n"
+        "X9.000Y9.000\n" // back in drill mode - this must be a Flash, not a Stroke
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    QCOMPARE(static_cast<int>(layer.objects[1].type), static_cast<int>(ObjectType::Flash));
+    QCOMPARE(layer.objects[1].position.x, GerberFormat::mmToNm(9.0));
 }
 
 QTEST_MAIN(TestExcellonParser)
