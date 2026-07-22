@@ -17,6 +17,14 @@ target_include_directories(test_archivereader PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivereader PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
 add_test(NAME test_archivereader COMMAND test_archivereader)
 
+add_executable(test_archivetreemodel
+    test_archivetreemodel.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivetreemodel.cpp
+)
+target_include_directories(test_archivetreemodel PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivetreemodel PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+add_test(NAME test_archivetreemodel COMMAND test_archivetreemodel)
+
 add_executable(test_gerberdifftrigger
     test_gerberdifftrigger.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/gerberdifftrigger.cpp
