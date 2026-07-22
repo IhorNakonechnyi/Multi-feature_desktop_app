@@ -1,10 +1,15 @@
 #include "mainwindow.h"
 
+#include <QLabel>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QVBoxLayout>
+#include <QWidget>
 
 #include "sidebarnav.h"
+#include "statuslegend.h"
 #include "../archivecompare/archivecomparepage.h"
+#include "../common/palette.h"
 #include "../gerber/gerberviewerpage.h"
 #include "../quotecompare/quotecomparepage.h"
 #include "../supplieradvisor/supplieradvisorpage.h"
@@ -14,7 +19,28 @@ MainWindow::MainWindow(QWidget *parent)
 {
     auto *splitter = new QSplitter(Qt::Horizontal, this);
 
-    nav_ = new SidebarNav(splitter);
+    // SidebarNav is a QListWidget itself, not a container - it can't hold
+    // the wordmark label or the status legend card as direct children, so
+    // this wrapper stacks all three: wordmark on top, the nav list taking
+    // the remaining space, the legend card pinned to the bottom. This
+    // wrapper - not nav_ directly - is what goes into the splitter.
+    auto *sidebarPanel = new QWidget(splitter);
+    sidebarPanel->setObjectName("sidebarPanel");
+    sidebarPanel->setAttribute(Qt::WA_StyledBackground, true);
+    auto *sidebarLayout = new QVBoxLayout(sidebarPanel);
+    sidebarLayout->setContentsMargins(10, 16, 10, 16);
+    sidebarLayout->setSpacing(4);
+
+    auto *wordmark = new QLabel(tr("PCB Suite"));
+    wordmark->setObjectName("sidebarWordmark");
+    sidebarLayout->addWidget(wordmark);
+
+    nav_ = new SidebarNav(sidebarPanel);
+    sidebarLayout->addWidget(nav_, 1);
+
+    statusLegend_ = new StatusLegend(sidebarPanel);
+    sidebarLayout->addWidget(statusLegend_);
+
     pages_ = new QStackedWidget(splitter);
 
     // Order must match SidebarNav's item order - currentRowChanged drives
@@ -32,4 +58,26 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1100, 700);
 
     connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
+    connect(nav_, &QListWidget::currentRowChanged, this, &MainWindow::updateStatusLegend);
+
+    updateStatusLegend(nav_->currentRow());
+}
+
+void MainWindow::updateStatusLegend(int pageIndex)
+{
+    // Only Archive Compare (index 0) has a comparison concept today; the
+    // other 3 pages are still stub "coming later" pages (see
+    // supplieradvisorpage.cpp / gerberviewerpage.cpp / quotecomparepage.cpp)
+    // with nothing meaningful to show yet - setEntries({}) hides the card.
+    // Colors are the same Palette calls ArchiveTreeDelegate already uses,
+    // so the legend can never drift out of sync with the tree's colors.
+    if (pageIndex == 0) {
+        statusLegend_->setEntries({
+            {Palette::sameBackground(), tr("Identical")},
+            {Palette::changedBackground(), tr("Different")},
+            {Palette::missingBackground(), tr("Only in this archive")},
+        });
+    } else {
+        statusLegend_->setEntries({});
+    }
 }

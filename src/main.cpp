@@ -2,6 +2,7 @@
 #include <QStyleHints>
 
 #include "app/mainwindow.h"
+#include "app/theme.h"
 
 int main(int argc, char *argv[])
 {
@@ -17,6 +18,8 @@ int main(int argc, char *argv[])
     // strings at every call site.
     QApplication::setOrganizationName("PcbSupplierWorkflow");
     QApplication::setApplicationName("PcbSupplierWorkflow");
+
+    app.setStyleSheet(themeStylesheet());
 
     MainWindow window;
     window.show();

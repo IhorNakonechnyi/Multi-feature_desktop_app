@@ -69,6 +69,8 @@ add_executable(PcbSupplierWorkflow
     src/app/sidebarnav.cpp
     src/app/statuslegend.h
     src/app/statuslegend.cpp
+    src/app/theme.h
+    src/app/theme.cpp
     src/common/palette.h
     src/common/localsettings.h
     src/common/localsettings.cpp
