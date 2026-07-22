@@ -19,12 +19,15 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
     , roleLabel_(roleLabel)
 {
     setAcceptDrops(true);
+    setAttribute(Qt::WA_StyledBackground, true);
 
     auto *layout = new QVBoxLayout(this);
 
     auto *header = new QWidget;
+    header->setObjectName("treeCardHeader");
+    header->setAttribute(Qt::WA_StyledBackground, true);
     auto *headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(4, 4, 4, 4);
+    headerLayout->setContentsMargins(10, 8, 10, 8);
     fileNameLabel_ = new QLabel(tr("%1: (drop a .zip file here)").arg(roleLabel_));
     changeButton_ = new QPushButton(tr("Change..."));
     headerLayout->addWidget(fileNameLabel_, 1);
