@@ -1,0 +1,5 @@
+// Windows resource file: sets the icon shown for the .exe itself (File
+// Explorer, taskbar before the window's own icon is set, Alt-Tab). The
+// first ICON statement in a Windows .rc file becomes the executable's
+// default icon - this file exists solely for that one line.
+IDI_MAIN_ICON ICON "icons/icon.ico"

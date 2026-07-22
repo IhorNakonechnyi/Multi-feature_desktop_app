@@ -55,7 +55,7 @@ MainWindow::MainWindow(QWidget *parent)
     splitter->setStretchFactor(1, 1); // content: grows
 
     setCentralWidget(splitter);
-    setWindowTitle(tr("PCB Supplier Workflow"));
+    setWindowTitle(tr("PCB Gadget"));
     resize(1100, 700);
 
     connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);

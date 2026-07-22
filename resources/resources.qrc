@@ -4,5 +4,6 @@
         <file alias="icons/supplier-advisor.svg">icons/supplier-advisor.svg</file>
         <file alias="icons/gerber-viewer.svg">icons/gerber-viewer.svg</file>
         <file alias="icons/quote-compare.svg">icons/quote-compare.svg</file>
+        <file alias="icons/icon.png">icons/icon.png</file>
     </qresource>
 </RCC>

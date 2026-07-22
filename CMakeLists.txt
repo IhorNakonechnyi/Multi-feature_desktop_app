@@ -126,6 +126,7 @@ add_executable(PcbSupplierWorkflow
     src/quotecompare/quotecomparepage.h
     src/quotecompare/quotecomparepage.cpp
     resources/resources.qrc
+    resources/app.rc
 )
 
 target_include_directories(PcbSupplierWorkflow PRIVATE src)

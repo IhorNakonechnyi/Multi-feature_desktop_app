@@ -44,6 +44,7 @@ constexpr auto SidebarTitleText = "#e2e5e8";
 constexpr auto NavActiveBackground = "#1d1f23";
 constexpr auto NavActiveText = "#f0f2f5";
 constexpr auto NavInactiveText = "#7d8085";
+constexpr auto NavDisabledText = "#4a4c50"; // dimmer than NavInactiveText - not-yet-built pages
 constexpr auto LegendCardBackground = "#141619";
 constexpr auto LegendLabelText = "#6f7276";
 constexpr auto LegendItemText = "#bbbec3";

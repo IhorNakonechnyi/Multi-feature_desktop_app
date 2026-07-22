@@ -17,6 +17,7 @@ QString themeStylesheet()
                  .arg(Palette::NavInactiveText);
     rules << QString("SidebarNav::item:selected { background: %1; color: %2; font-weight: 600; }")
                  .arg(Palette::NavActiveBackground, Palette::NavActiveText);
+    rules << QString("SidebarNav::item:disabled { color: %1; }").arg(Palette::NavDisabledText);
     rules << QString("StatusLegend { background: %1; border-radius: 8px; }")
                  .arg(Palette::LegendCardBackground);
     rules << QString("QLabel#legendTitleLabel { color: %1; font-size: 10px; }")
