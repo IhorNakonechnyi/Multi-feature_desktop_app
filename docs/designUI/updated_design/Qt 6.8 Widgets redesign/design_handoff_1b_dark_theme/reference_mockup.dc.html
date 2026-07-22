@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    body { margin: 0; background: oklch(0.14 0.005 260); font-family: 'Inter', -apple-system, sans-serif; }
+    @font-face { font-family: 'JBMono'; src: local('JetBrains Mono'), local('SF Mono'), local('Menlo'); }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</helmet>
+
+<section style="padding:48px 48px 96px;">
+  <div style="color:oklch(0.7 0.01 260);font-family:'JetBrains Mono',monospace;font-size:13px;margin-bottom:24px;letter-spacing:0.05em;text-transform:uppercase;">Turn 1 — three directions, dense/dark, neutral monochrome accent</div>
+
+  <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap;">
+
+    <!-- ============ OPTION 1a: Structural / Hairline ============ -->
+    <div id="1a" style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="background:oklch(0.9 0.01 260);color:#111;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:3px 9px;border-radius:3px;">1a</span>
+        <span style="color:oklch(0.85 0.01 260);font-weight:600;font-size:15px;">Structural — hairline dividers, flat, text-first</span>
+      </div>
+      <div style="width:1080px;height:720px;background:oklch(0.155 0.004 260);border:1px solid oklch(0.28 0.005 260);display:flex;overflow:hidden;font-family:Inter,sans-serif;">
+        <!-- sidebar -->
+        <div style="width:180px;flex-shrink:0;background:oklch(0.13 0.004 260);border-right:1px solid oklch(0.26 0.005 260);display:flex;flex-direction:column;padding:16px 0;">
+          <div style="padding:0 16px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;color:oklch(0.55 0.01 260);letter-spacing:0.08em;border-bottom:1px solid oklch(0.26 0.005 260);margin-bottom:8px;padding-bottom:12px;">PCB·SUITE</div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="padding:9px 16px;border-left:2px solid oklch(0.82 0.03 250);background:oklch(0.19 0.006 260);color:oklch(0.95 0.005 260);font-size:13px;font-weight:600;">Archive Compare</div>
+            <div style="padding:9px 16px;border-left:2px solid transparent;color:oklch(0.62 0.008 260);font-size:13px;">Supplier Advisor</div>
+            <div style="padding:9px 16px;border-left:2px solid transparent;color:oklch(0.62 0.008 260);font-size:13px;">Gerber Viewer</div>
+            <div style="padding:9px 16px;border-left:2px solid transparent;color:oklch(0.62 0.008 260);font-size:13px;">Quote Compare</div>
+          </div>
+          <div style="margin-top:auto;padding:12px 16px 0;border-top:1px solid oklch(0.26 0.005 260);">
+            <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.5 0.008 260);letter-spacing:0.06em;margin-bottom:6px;">STATUS</div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:oklch(0.75 0.008 260);"><span style="width:7px;height:7px;background:oklch(0.82 0.03 250);"></span>Match</div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:oklch(0.75 0.008 260);"><span style="width:7px;height:7px;border:1px solid oklch(0.6 0.01 260);"></span>Mismatch</div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:oklch(0.45 0.008 260);"><span style="width:7px;height:7px;background:oklch(0.3 0.008 260);"></span>Missing</div>
+            </div>
+          </div>
+        </div>
+        <!-- body -->
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+          <div style="height:40px;border-bottom:1px solid oklch(0.26 0.005 260);display:flex;align-items:center;padding:0 16px;color:oklch(0.85 0.01 260);font-size:13px;font-weight:600;">Archive Compare</div>
+          <div style="flex:1;display:flex;min-height:0;">
+            <div style="width:220px;border-right:1px solid oklch(0.26 0.005 260);overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:oklch(0.9 0.01 260);border-bottom:1px solid oklch(0.24 0.005 260);">rev_A.zip</div>
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 12px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:{{ row.dim1a }};">
+                  <span style="width:6px;height:6px;flex-shrink:0;background:{{ row.dot1a }};"></span>{{ row.name }}
+                </div>
+              </sc-for>
+            </div>
+            <div style="width:220px;border-right:1px solid oklch(0.26 0.005 260);overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:oklch(0.9 0.01 260);border-bottom:1px solid oklch(0.24 0.005 260);">rev_B.zip</div>
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 12px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:{{ row.dim1a }};">
+                  <span style="width:6px;height:6px;flex-shrink:0;background:{{ row.dot1a }};"></span>{{ row.name }}
+                </div>
+              </sc-for>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;">
+              <div style="padding:8px 14px;border-bottom:1px solid oklch(0.26 0.005 260);">
+                <div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:oklch(0.5 0.008 260);letter-spacing:0.06em;margin-bottom:6px;">MISMATCHED PAIRS — SELECT TO VIEW</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <sc-for list="{{ pairs }}" as="pair">
+                    <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;font-family:'JetBrains Mono',monospace;font-size:11px;border-left:2px solid {{ pair.activeColor }};color:oklch(0.85 0.01 260);background:oklch(0.19 0.006 260);">{{ pair.label }} <span style="color:oklch(0.5 0.008 260);">⇄</span> {{ pair.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="flex:1;background:repeating-linear-gradient(0deg,oklch(0.17 0.004 260) 0px,oklch(0.17 0.004 260) 19px,oklch(0.19 0.004 260) 20px),repeating-linear-gradient(90deg,oklch(0.17 0.004 260) 0px,oklch(0.17 0.004 260) 19px,oklch(0.19 0.004 260) 20px);display:flex;align-items:center;justify-content:center;color:oklch(0.4 0.008 260);font-family:'JetBrains Mono',monospace;font-size:11px;">canvas / diff render — silkscreen_top.gbr</div>
+              <div style="height:96px;border-top:1px solid oklch(0.26 0.005 260);padding:10px 14px;overflow:auto;">
+                <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:oklch(0.55 0.008 260);margin-bottom:6px;">DETAIL</div>
+                <div style="font-size:12px;color:oklch(0.75 0.01 260);line-height:1.6;">Trace width delta: <span style="color:oklch(0.9 0.01 260);">+0.05mm</span> on layer L2, net GND_PLANE.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ OPTION 1b: Elevated Panels ============ -->
+    <div id="1b" style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="background:oklch(0.9 0.01 260);color:#111;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:3px 9px;border-radius:3px;">1b</span>
+        <span style="color:oklch(0.85 0.01 260);font-weight:600;font-size:15px;">Elevated panels — soft cards, icon+label sidebar, rounded-sm</span>
+      </div>
+      <div style="width:1080px;height:720px;background:oklch(0.145 0.004 260);border-radius:10px;border:1px solid oklch(0.27 0.005 260);display:flex;flex-direction:column;overflow:hidden;font-family:Inter,sans-serif;box-shadow:0 20px 50px -20px rgba(0,0,0,0.6);">
+        <div style="height:38px;flex-shrink:0;background:oklch(0.12 0.004 260);border-bottom:1px solid oklch(0.27 0.005 260);display:flex;align-items:center;padding:0 12px;gap:8px;">
+          <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.4 0.008 260);"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.4 0.008 260);"></span>
+          <span style="width:11px;height:11px;border-radius:50%;background:oklch(0.4 0.008 260);"></span>
+          <span style="margin-left:8px;color:oklch(0.6 0.008 260);font-size:12.5px;font-weight:600;">PCB Suite — Archive Compare</span>
+        </div>
+        <div style="flex:1;display:flex;min-height:0;">
+        <div style="width:216px;flex-shrink:0;background:oklch(0.16 0.005 260);display:flex;flex-direction:column;padding:16px 10px;gap:4px;">
+          <div style="padding:0 6px 16px;font-weight:700;font-size:14px;color:oklch(0.92 0.005 260);">PCB Suite</div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:8px;background:oklch(0.24 0.008 260);color:oklch(0.96 0.005 260);font-size:13.5px;font-weight:600;"><span style="width:24px;height:24px;border-radius:6px;background:oklch(0.82 0.03 250);flex-shrink:0;"></span>Archive Compare</div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:8px;color:oklch(0.6 0.008 260);font-size:13.5px;"><span style="width:24px;height:24px;border-radius:6px;background:oklch(0.32 0.008 260);flex-shrink:0;"></span>Supplier Advisor</div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:8px;color:oklch(0.6 0.008 260);font-size:13.5px;"><span style="width:24px;height:24px;border-radius:6px;background:oklch(0.32 0.008 260);flex-shrink:0;"></span>Gerber Viewer</div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:8px;color:oklch(0.6 0.008 260);font-size:13.5px;"><span style="width:24px;height:24px;border-radius:6px;background:oklch(0.32 0.008 260);flex-shrink:0;"></span>Quote Compare</div>
+          <div style="margin-top:auto;background:oklch(0.2 0.006 260);border-radius:8px;padding:12px;">
+            <div style="font-size:10px;color:oklch(0.55 0.008 260);letter-spacing:0.06em;margin-bottom:8px;">STATUS LEGEND</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:oklch(0.8 0.008 260);"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.82 0.03 250);"></span>Match</div>
+              <div style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:oklch(0.8 0.008 260);"><span style="width:9px;height:9px;border-radius:50%;background:oklch(0.55 0.01 260);"></span>Mismatch</div>
+              <div style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:oklch(0.5 0.008 260);"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid oklch(0.4 0.008 260);"></span>Missing</div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;padding:14px;gap:12px;">
+          <div style="color:oklch(0.92 0.005 260);font-size:15px;font-weight:700;">Archive Compare</div>
+          <div style="flex:1;display:flex;gap:12px;min-height:0;">
+            <div style="width:210px;background:oklch(0.18 0.005 260);border-radius:8px;overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:8px 10px;font-size:12px;font-weight:700;color:oklch(0.92 0.005 260);border-bottom:1px solid oklch(0.24 0.006 260);">rev_A.zip</div>
+              <div style="padding:6px;">
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12px;color:oklch(0.82 0.008 260);">
+                  <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:{{ row.dot1a }};"></span>{{ row.name }}
+                </div>
+              </sc-for>
+              </div>
+            </div>
+            <div style="width:210px;background:oklch(0.18 0.005 260);border-radius:8px;overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:8px 10px;font-size:12px;font-weight:700;color:oklch(0.92 0.005 260);border-bottom:1px solid oklch(0.24 0.006 260);">rev_B.zip</div>
+              <div style="padding:6px;">
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12px;color:oklch(0.82 0.008 260);">
+                  <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:{{ row.dot1a }};"></span>{{ row.name }}
+                </div>
+              </sc-for>
+              </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0;">
+              <div style="background:oklch(0.18 0.005 260);border-radius:8px;padding:10px 12px;">
+                <div style="font-size:10px;color:oklch(0.55 0.008 260);letter-spacing:0.05em;margin-bottom:8px;font-weight:600;">MISMATCHED PAIRS — SELECT TO VIEW</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <sc-for list="{{ pairs }}" as="pair">
+                    <div style="display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:16px;font-size:11.5px;color:oklch(0.9 0.005 260);background:{{ pair.activeBg1b }};">{{ pair.label }} <span style="color:oklch(0.6 0.01 260);">⇄</span> {{ pair.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="flex:1;background:oklch(0.19 0.005 260);border-radius:8px;display:flex;align-items:center;justify-content:center;color:oklch(0.42 0.008 260);font-size:12px;">canvas / diff render — silkscreen_top.gbr</div>
+              <div style="height:96px;background:oklch(0.18 0.005 260);border-radius:8px;padding:10px 14px;overflow:auto;">
+                <div style="font-size:11px;color:oklch(0.55 0.008 260);margin-bottom:6px;font-weight:600;">DETAIL</div>
+                <div style="font-size:12.5px;color:oklch(0.82 0.01 260);line-height:1.6;">Trace width delta: <span style="color:oklch(0.95 0.01 260);font-weight:600;">+0.05mm</span> on layer L2, net GND_PLANE.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ OPTION 1c: Technical Blueprint ============ -->
+    <div id="1c" style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="background:oklch(0.9 0.01 260);color:#111;font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:3px 9px;border-radius:3px;">1c</span>
+        <span style="color:oklch(0.85 0.01 260);font-weight:600;font-size:15px;">Technical blueprint — monospace-led, bracket tags, icon rail</span>
+      </div>
+      <div style="width:1080px;height:720px;background:oklch(0.13 0.004 260);border:1px solid oklch(0.3 0.006 260);display:flex;overflow:hidden;font-family:'JetBrains Mono',monospace;">
+        <div style="width:52px;flex-shrink:0;background:oklch(0.11 0.004 260);border-right:1px solid oklch(0.3 0.006 260);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:18px;">
+          <div style="width:26px;height:26px;background:oklch(0.82 0.03 250);border-radius:3px;"></div>
+          <div style="width:26px;height:26px;border:1px solid oklch(0.4 0.008 260);border-radius:3px;"></div>
+          <div style="width:26px;height:26px;border:1px solid oklch(0.32 0.008 260);border-radius:3px;"></div>
+          <div style="width:26px;height:26px;border:1px solid oklch(0.32 0.008 260);border-radius:3px;"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+          <div style="height:36px;border-bottom:1px solid oklch(0.3 0.006 260);display:flex;align-items:center;padding:0 16px;">
+            <div style="color:oklch(0.9 0.01 260);font-size:12px;letter-spacing:0.04em;">[ ARCHIVE_COMPARE ]</div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0;">
+            <div style="width:230px;border-right:1px solid oklch(0.3 0.006 260);overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:7px 12px;font-size:11px;font-weight:700;color:oklch(0.92 0.01 260);border-bottom:1px solid oklch(0.3 0.006 260);background:oklch(0.16 0.005 260);">[ rev_A.zip ]</div>
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:11px;color:oklch(0.78 0.008 260);border-bottom:1px solid oklch(0.2 0.006 260);">
+                  <span style="color:{{ row.dot1a }};font-weight:700;">{{ row.tag1c }}</span>{{ row.name }}
+                </div>
+              </sc-for>
+            </div>
+            <div style="width:230px;border-right:1px solid oklch(0.3 0.006 260);overflow:auto;display:flex;flex-direction:column;">
+              <div style="padding:7px 12px;font-size:11px;font-weight:700;color:oklch(0.92 0.01 260);border-bottom:1px solid oklch(0.3 0.006 260);background:oklch(0.16 0.005 260);">[ rev_B.zip ]</div>
+              <sc-for list="{{ fileRows }}" as="row">
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:11px;color:oklch(0.78 0.008 260);border-bottom:1px solid oklch(0.2 0.006 260);">
+                  <span style="color:{{ row.dot1a }};font-weight:700;">{{ row.tag1c }}</span>{{ row.name }}
+                </div>
+              </sc-for>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;">
+              <div style="padding:8px 14px;border-bottom:1px solid oklch(0.3 0.006 260);">
+                <div style="font-size:10px;color:oklch(0.55 0.008 260);letter-spacing:0.05em;margin-bottom:6px;">[ MISMATCHED_PAIRS — SELECT ]</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                  <sc-for list="{{ pairs }}" as="pair">
+                    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:oklch(0.85 0.01 260);border:1px solid oklch(0.35 0.008 260);padding:3px 8px;">{{ pair.label }} <span style="color:oklch(0.5 0.008 260);">::</span> {{ pair.label }}</div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="flex:1;position:relative;background:oklch(0.15 0.004 260);display:flex;align-items:center;justify-content:center;color:oklch(0.4 0.008 260);font-size:11px;">
+                <div style="position:absolute;inset:20px;border:1px dashed oklch(0.3 0.008 260);"></div>
+                canvas / diff render — silkscreen_top.gbr
+              </div>
+              <div style="height:96px;border-top:1px solid oklch(0.3 0.006 260);padding:10px 14px;overflow:auto;">
+                <div style="font-size:10.5px;color:oklch(0.55 0.008 260);margin-bottom:6px;">[ DETAIL ]</div>
+                <div style="font-size:11.5px;color:oklch(0.8 0.01 260);line-height:1.7;">TRACE_WIDTH_DELTA: <span style="color:oklch(0.92 0.01 260);">+0.05mm</span> L2 / GND_PLANE</div>
+              </div>
+            </div>
+          </div>
+          <div style="height:26px;border-top:1px solid oklch(0.3 0.006 260);display:flex;align-items:center;gap:14px;padding:0 14px;">
+            <div style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:oklch(0.75 0.008 260);"><span style="color:oklch(0.82 0.03 250);">■</span>MATCH</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:oklch(0.75 0.008 260);"><span style="color:oklch(0.55 0.01 260);">■</span>MISMATCH</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:oklch(0.5 0.008 260);"><span style="color:oklch(0.35 0.008 260);">■</span>MISSING</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const fileRows = [
+      { name: 'top_copper.gbr', dot1a: 'oklch(0.82 0.03 250)', dim1a: 'oklch(0.75 0.01 260)', tag1c: '[M]' },
+      { name: 'bottom_copper.gbr', dot1a: 'oklch(0.82 0.03 250)', dim1a: 'oklch(0.75 0.01 260)', tag1c: '[M]' },
+      { name: 'silkscreen_top.gbr', dot1a: 'oklch(0.55 0.01 260)', dim1a: 'oklch(0.9 0.01 260)', tag1c: '[X]' },
+      { name: 'drill_map.xln', dot1a: 'oklch(0.3 0.008 260)', dim1a: 'oklch(0.45 0.008 260)', tag1c: '[-]' },
+      { name: 'soldermask_bot.gbr', dot1a: 'oklch(0.82 0.03 250)', dim1a: 'oklch(0.75 0.01 260)', tag1c: '[M]' },
+      { name: 'outline.gbr', dot1a: 'oklch(0.55 0.01 260)', dim1a: 'oklch(0.9 0.01 260)', tag1c: '[X]' },
+      { name: 'paste_top.gbr', dot1a: 'oklch(0.82 0.03 250)', dim1a: 'oklch(0.75 0.01 260)', tag1c: '[M]' },
+    ];
+    const pairs = [
+      { label: 'silkscreen_top.gbr', activeColor: 'oklch(0.82 0.03 250)', activeBg1b: 'oklch(0.28 0.02 250)', activeBg1c: '#0d0d0d' },
+      { label: 'outline.gbr', activeColor: 'transparent', activeBg1b: 'oklch(0.2 0.006 260)', activeBg1c: '#0d0d0d' },
+    ];
+    return { fileRows, pairs };
+  }
+}
+</script>
+</body>
+</html>
