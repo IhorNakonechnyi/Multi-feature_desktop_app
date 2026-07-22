@@ -7,7 +7,6 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSplitter>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -30,6 +29,36 @@ namespace {
 // color picker is an explicit non-goal until the overlay is in daily use.
 const QColor kColorA(60, 220, 60);
 const QColor kColorB(220, 60, 60);
+
+// The additive overlap color MaskCompositor::composite() actually produces
+// for unchanged copper (CompositionMode_Plus sums each channel, capped at
+// 255) - used so the Detail card's legend swatch shows the exact on-canvas
+// color, not just an approximate "yellow".
+const QColor kColorOverlap(qMin(255, kColorA.red() + kColorB.red()),
+                            qMin(255, kColorA.green() + kColorB.green()),
+                            qMin(255, kColorA.blue() + kColorB.blue()));
+
+// One legend row: a short colored line (not a dot, to read as distinct from
+// the StatusLegend's circular swatches) followed by its description.
+QWidget *makeColorLegendRow(const QColor &color, const QString &description)
+{
+    auto *row = new QWidget;
+    auto *rowLayout = new QHBoxLayout(row);
+    rowLayout->setContentsMargins(0, 0, 0, 0);
+    rowLayout->setSpacing(8);
+
+    auto *line = new QLabel;
+    line->setFixedSize(20, 4);
+    line->setAttribute(Qt::WA_StyledBackground, true);
+    line->setStyleSheet(QString("background:%1;").arg(color.name()));
+
+    auto *text = new QLabel(description);
+    text->setObjectName("detailLabel");
+
+    rowLayout->addWidget(line);
+    rowLayout->addWidget(text);
+    return row;
+}
 
 // One list row's label: the A-side path, plus " <-> B-path" only when the
 // two sides differ (a filename-fallback match can pair files at different
@@ -77,16 +106,12 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *contentRow = new QHBoxLayout;
     contentRow->setSpacing(12);
 
-    // A real (draggable) splitter, not fixed-width cards: archive names can
-    // be long, so the user needs to be able to widen either tree on demand
-    // rather than being stuck with whatever fixed width fits the common case.
-    auto *treeSplitter = new QSplitter(Qt::Horizontal);
     panelA_ = new ArchivePanel(tr("New"));
+    panelA_->setFixedWidth(252); // +20% over the original 210px
     panelB_ = new ArchivePanel(tr("Old"));
-    treeSplitter->addWidget(panelA_);
-    treeSplitter->addWidget(panelB_);
-    treeSplitter->setSizes({252, 252}); // base width +20% over the old fixed 210px
-    contentRow->addWidget(treeSplitter);
+    panelB_->setFixedWidth(252);
+    contentRow->addWidget(panelA_);
+    contentRow->addWidget(panelB_);
 
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(12);
@@ -145,23 +170,16 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *detailCardLayout = new QVBoxLayout(detailCard);
     detailCardLayout->setContentsMargins(14, 10, 14, 10);
 
-    auto *legendGreen = new QLabel(tr("green = only new"));
-    legendGreen->setObjectName("detailLabel");
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
     renderTimeLabel_->setObjectName("detailLabel");
     auto *firstLine = new QHBoxLayout;
-    firstLine->addWidget(legendGreen);
+    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only new")));
     firstLine->addStretch();
     firstLine->addWidget(renderTimeLabel_);
 
-    auto *legendRed = new QLabel(tr("red = only old"));
-    legendRed->setObjectName("detailLabel");
-    auto *legendYellow = new QLabel(tr("yellow = same"));
-    legendYellow->setObjectName("detailLabel");
-
     detailCardLayout->addLayout(firstLine);
-    detailCardLayout->addWidget(legendRed);
-    detailCardLayout->addWidget(legendYellow);
+    detailCardLayout->addWidget(makeColorLegendRow(kColorB, tr("only old")));
+    detailCardLayout->addWidget(makeColorLegendRow(kColorOverlap, tr("same")));
 
     rightColumn->addWidget(pairsCard);
     rightColumn->addWidget(canvasCard, 1);

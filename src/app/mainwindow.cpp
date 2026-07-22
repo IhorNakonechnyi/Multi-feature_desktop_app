@@ -33,6 +33,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     auto *wordmark = new QLabel(tr("What do you want?"));
     wordmark->setObjectName("sidebarWordmark");
+    wordmark->setWordWrap(true);
     sidebarLayout->addWidget(wordmark);
 
     nav_ = new SidebarNav(sidebarPanel);

@@ -9,7 +9,7 @@ QString themeStylesheet()
     QStringList rules;
 
     rules << QString("#sidebarPanel { background: %1; }").arg(Palette::SidebarBackground);
-    rules << QString("#sidebarWordmark { color: %1; font-size: 14px; font-weight: 700; }")
+    rules << QString("#sidebarWordmark { color: %1; font-size: 19px; font-weight: 700; }")
                  .arg(Palette::SidebarTitleText);
     rules << QString("SidebarNav { background: %1; border: none; outline: none; }")
                  .arg(Palette::SidebarBackground);
