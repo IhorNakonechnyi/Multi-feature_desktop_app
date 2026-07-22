@@ -29,6 +29,13 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
     auto *headerLayout = new QHBoxLayout(header);
     headerLayout->setContentsMargins(10, 8, 10, 8);
     fileNameLabel_ = new QLabel(tr("%1: (drop a .zip file here)").arg(roleLabel_));
+    fileNameLabel_->setWordWrap(true);
+    fileNameLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    // Fixed at exactly 2 lines' height, regardless of the current text, so
+    // a long archive name that wraps in one panel doesn't push that
+    // panel's tree down relative to the other's - both trees always start
+    // at the same Y position because both labels reserve the same height.
+    fileNameLabel_->setFixedHeight(fileNameLabel_->fontMetrics().height() * 2);
     changeButton_ = new QPushButton(tr("Change..."));
     headerLayout->addWidget(fileNameLabel_, 1);
     headerLayout->addWidget(changeButton_);

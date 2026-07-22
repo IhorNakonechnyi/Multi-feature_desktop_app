@@ -31,7 +31,7 @@ MainWindow::MainWindow(QWidget *parent)
     sidebarLayout->setContentsMargins(10, 16, 10, 16);
     sidebarLayout->setSpacing(4);
 
-    auto *wordmark = new QLabel(tr("PCB Suite"));
+    auto *wordmark = new QLabel(tr("What do you want?"));
     wordmark->setObjectName("sidebarWordmark");
     sidebarLayout->addWidget(wordmark);
 

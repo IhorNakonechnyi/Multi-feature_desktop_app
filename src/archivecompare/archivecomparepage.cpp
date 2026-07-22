@@ -7,6 +7,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSplitter>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -76,12 +77,16 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *contentRow = new QHBoxLayout;
     contentRow->setSpacing(12);
 
-    panelA_ = new ArchivePanel(tr("New (A)"));
-    panelA_->setFixedWidth(210);
-    panelB_ = new ArchivePanel(tr("Old (B)"));
-    panelB_->setFixedWidth(210);
-    contentRow->addWidget(panelA_);
-    contentRow->addWidget(panelB_);
+    // A real (draggable) splitter, not fixed-width cards: archive names can
+    // be long, so the user needs to be able to widen either tree on demand
+    // rather than being stuck with whatever fixed width fits the common case.
+    auto *treeSplitter = new QSplitter(Qt::Horizontal);
+    panelA_ = new ArchivePanel(tr("New"));
+    panelB_ = new ArchivePanel(tr("Old"));
+    treeSplitter->addWidget(panelA_);
+    treeSplitter->addWidget(panelB_);
+    treeSplitter->setSizes({252, 252}); // base width +20% over the old fixed 210px
+    contentRow->addWidget(treeSplitter);
 
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(12);
@@ -99,8 +104,12 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     gerberPairList_ = new QListWidget;
     gerberPairList_->setObjectName("pairsList");
     // Compact by design (the mockup's pill row is content-sized, not
-    // stretched) - scrolls internally if there are more pairs than fit.
-    gerberPairList_->setMaximumHeight(140);
+    // stretched) - sized for ~3 visible rows, scrolls internally if there
+    // are more pairs than fit.
+    gerberPairList_->setMaximumHeight(90);
+    pairStatusLabel_ = new QLabel;
+    pairStatusLabel_->setObjectName("detailLabel");
+    pairStatusLabel_->setWordWrap(true);
     skippedUnrecognizedLabel_ = new QLabel;
     skippedUnrecognizedLabel_->setWordWrap(true);
     skippedUnrecognizedLabel_->setVisible(false);
@@ -114,6 +123,7 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
     pairsCardLayout->addWidget(explanation);
     pairsCardLayout->addWidget(gerberPairList_);
+    pairsCardLayout->addWidget(pairStatusLabel_);
     pairsCardLayout->addWidget(skippedUnrecognizedLabel_);
     pairsCardLayout->addWidget(skippedUnrecognizedButtonRow_);
     pairsCardLayout->addWidget(skippedDrillLabel_);
@@ -127,23 +137,31 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     gerberCanvas_ = new CompositeView;
     canvasCardLayout->addWidget(gerberCanvas_);
 
-    // Detail card: per-pair status text, render time, and the static
-    // overlay color legend - three separate elements sharing one card.
+    // Detail card: the static overlay color legend, one color per line,
+    // with the render time right-aligned on the first line.
     auto *detailCard = new QWidget;
     detailCard->setObjectName("detailCard");
     detailCard->setAttribute(Qt::WA_StyledBackground, true);
     auto *detailCardLayout = new QVBoxLayout(detailCard);
     detailCardLayout->setContentsMargins(14, 10, 14, 10);
-    pairStatusLabel_ = new QLabel;
-    pairStatusLabel_->setObjectName("detailLabel");
-    pairStatusLabel_->setWordWrap(true);
+
+    auto *legendGreen = new QLabel(tr("green = only new"));
+    legendGreen->setObjectName("detailLabel");
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
     renderTimeLabel_->setObjectName("detailLabel");
-    auto *overlayLegend = new QLabel(tr("green = only new  |  red = only old  |  yellow = same"));
-    overlayLegend->setObjectName("detailLabel");
-    detailCardLayout->addWidget(pairStatusLabel_);
-    detailCardLayout->addWidget(renderTimeLabel_);
-    detailCardLayout->addWidget(overlayLegend);
+    auto *firstLine = new QHBoxLayout;
+    firstLine->addWidget(legendGreen);
+    firstLine->addStretch();
+    firstLine->addWidget(renderTimeLabel_);
+
+    auto *legendRed = new QLabel(tr("red = only old"));
+    legendRed->setObjectName("detailLabel");
+    auto *legendYellow = new QLabel(tr("yellow = same"));
+    legendYellow->setObjectName("detailLabel");
+
+    detailCardLayout->addLayout(firstLine);
+    detailCardLayout->addWidget(legendRed);
+    detailCardLayout->addWidget(legendYellow);
 
     rightColumn->addWidget(pairsCard);
     rightColumn->addWidget(canvasCard, 1);
