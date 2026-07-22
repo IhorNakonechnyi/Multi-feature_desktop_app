@@ -90,7 +90,7 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *leftColumnLayout = new QVBoxLayout(leftColumn);
     leftColumnLayout->setContentsMargins(4, 4, 4, 4);
     auto *explanation = new QLabel(
-        tr("Changed Gerber files. Select a pair and click Show to compare old vs new."));
+        tr("Changed Gerber files. Select a pair to preview the diff."));
     explanation->setWordWrap(true);
     gerberPairList_ = new QListWidget;
     pairStatusLabel_ = new QLabel;
@@ -112,8 +112,6 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     skippedDrillLabel_->setWordWrap(true);
     skippedDrillLabel_->setVisible(false);
 
-    showButton_ = new QPushButton(tr("Show"));
-    showButton_->setEnabled(false);
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
     auto *legend = new QLabel(tr("green = only new  |  red = only old  |  yellow = same"));
 
@@ -123,7 +121,6 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     leftColumnLayout->addWidget(skippedUnrecognizedLabel_);
     leftColumnLayout->addWidget(skippedUnrecognizedButtonRow_);
     leftColumnLayout->addWidget(skippedDrillLabel_);
-    leftColumnLayout->addWidget(showButton_);
     leftColumnLayout->addWidget(renderTimeLabel_);
     leftColumnLayout->addWidget(legend);
 
@@ -137,8 +134,7 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
     connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
     connect(gerberPairList_, &QListWidget::currentRowChanged, this,
-            [this](int row) { showButton_->setEnabled(row >= 0); });
-    connect(showButton_, &QPushButton::clicked, this, &ArchiveComparePage::showSelectedPair);
+            [this](int row) { if (row >= 0) showSelectedPair(); });
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownPair);
 }
 
@@ -193,7 +189,6 @@ void ArchiveComparePage::runComparison()
     for (const auto &pair : eligiblePairs_) {
         gerberPairList_->addItem(formatPairLabel(pair));
     }
-    showButton_->setEnabled(false);
     pairStatusLabel_->clear();
 
     const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);

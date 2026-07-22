@@ -11,7 +11,6 @@ class ArchivePanel;
 class CompositeView;
 class QLabel;
 class QListWidget;
-class QPushButton;
 class QWidget;
 
 // v1.0's feature page: two side-by-side ArchivePanels, re-compared
@@ -44,7 +43,6 @@ private:
     QLabel *skippedUnrecognizedLabel_;
     QWidget *skippedUnrecognizedButtonRow_;
     QLabel *skippedDrillLabel_;
-    QPushButton *showButton_;
     QLabel *renderTimeLabel_;
     CompositeView *gerberCanvas_;
 
