@@ -4,6 +4,7 @@
 #include <QDropEvent>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QMimeData>
 #include <QPushButton>
@@ -42,6 +43,13 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
 
     treeView_ = new QTreeView;
     treeView_->setHeaderHidden(true);
+    // Without this, the single column stretches to fill the viewport and a
+    // long file/folder name just gets clipped in place - there's nothing
+    // to scroll to because Qt never considers the column "wider than the
+    // viewport". Sizing the column to its actual content instead makes it
+    // genuinely wider than the panel when names are long, which is what
+    // makes the horizontal scrollbar appear and actually do something.
+    treeView_->header()->setStretchLastSection(false);
     model_ = new ArchiveTreeModel(this);
     treeView_->setModel(model_);
     treeView_->setItemDelegate(new ArchiveTreeDelegate(treeView_));
@@ -73,6 +81,9 @@ void ArchivePanel::showEntries(const QVector<ArchiveEntry> &entries)
 {
     model_->buildFrom(entries);
     treeView_->expandAll();
+    // Column must be re-sized to the new content every time - a fresh
+    // archive's names are a different width than the last one's.
+    treeView_->resizeColumnToContents(0);
 }
 
 void ArchivePanel::dragEnterEvent(QDragEnterEvent *event)
