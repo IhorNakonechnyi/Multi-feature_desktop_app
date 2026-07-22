@@ -211,6 +211,11 @@ void ArchiveComparePage::runComparison()
         gerberPairList_->addItem(formatPairLabel(pair));
     }
     pairStatusLabel_->clear();
+    // Reset to the same placeholder text the constructor starts with,
+    // not a blank label - otherwise a re-comparison after picking new
+    // archives leaves the *previous* pair's stale render time visible in
+    // the Detail card until the user clicks a new pair.
+    renderTimeLabel_->setText(tr("Render time: -"));
 
     const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
     const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
