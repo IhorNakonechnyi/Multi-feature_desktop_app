@@ -7,7 +7,6 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSplitter>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -65,42 +64,43 @@ QStringList distinctUnrecognizedExtensions(const QVector<DifferingPair> &unrecog
 ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     : QWidget(parent)
 {
+    setObjectName("archiveComparePage");
+    setAttribute(Qt::WA_StyledBackground, true);
+
     auto *layout = new QVBoxLayout(this);
 
     auto *title = new QLabel(tr("Archive compare"));
+    title->setObjectName("pageTitle");
     layout->addWidget(title);
 
-    auto *splitter = new QSplitter(Qt::Horizontal);
+    auto *contentRow = new QHBoxLayout;
+    contentRow->setSpacing(12);
+
     panelA_ = new ArchivePanel(tr("New (A)"));
+    panelA_->setFixedWidth(210);
     panelB_ = new ArchivePanel(tr("Old (B)"));
-    splitter->addWidget(panelA_);
-    splitter->addWidget(panelB_);
-    layout->addWidget(splitter, 7);
+    panelB_->setFixedWidth(210);
+    contentRow->addWidget(panelA_);
+    contentRow->addWidget(panelB_);
 
-    // Bottom area: the Gerber overlay-compare section. Fixed rather than a
-    // resizable splitter, matching the tree panes above. Always visible
-    // (keeps the 70/30 layout stable from launch) - an empty list plus the
-    // explanation label is the natural "nothing to compare yet" state, no
-    // separate empty-state UI needed.
-    gerberDiffContent_ = new QWidget;
-    auto *gerberDiffLayout = new QHBoxLayout(gerberDiffContent_);
-    gerberDiffLayout->setContentsMargins(0, 0, 0, 0);
+    auto *rightColumn = new QVBoxLayout;
+    rightColumn->setSpacing(12);
 
-    auto *leftColumn = new QWidget;
-    auto *leftColumnLayout = new QVBoxLayout(leftColumn);
-    leftColumnLayout->setContentsMargins(4, 4, 4, 4);
+    // Pairs card: which changed Gerber pairs can be previewed, plus the
+    // messaging for pairs that can't be (unrecognized extension, drill).
+    auto *pairsCard = new QWidget;
+    pairsCard->setObjectName("pairsCard");
+    pairsCard->setAttribute(Qt::WA_StyledBackground, true);
+    auto *pairsCardLayout = new QVBoxLayout(pairsCard);
+    pairsCardLayout->setContentsMargins(10, 10, 10, 10);
     auto *explanation = new QLabel(
         tr("Changed Gerber files. Select a pair to preview the diff."));
     explanation->setWordWrap(true);
     gerberPairList_ = new QListWidget;
-    pairStatusLabel_ = new QLabel;
-    pairStatusLabel_->setWordWrap(true);
-
-    // Shown only when runComparison() finds changed pairs it can't compare
-    // yet: unrecognized extensions (with an Add button, ported from the
-    // 3b2 parts bin) or drill files (informational only - this app's
-    // Gerber parser doesn't speak Excellon yet, see the design doc's M5).
-    // Both hidden by default; runComparison() shows/hides and repopulates.
+    gerberPairList_->setObjectName("pairsList");
+    // Compact by design (the mockup's pill row is content-sized, not
+    // stretched) - scrolls internally if there are more pairs than fit.
+    gerberPairList_->setMaximumHeight(140);
     skippedUnrecognizedLabel_ = new QLabel;
     skippedUnrecognizedLabel_->setWordWrap(true);
     skippedUnrecognizedLabel_->setVisible(false);
@@ -112,24 +112,45 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     skippedDrillLabel_->setWordWrap(true);
     skippedDrillLabel_->setVisible(false);
 
-    renderTimeLabel_ = new QLabel(tr("Render time: -"));
-    auto *legend = new QLabel(tr("green = only new  |  red = only old  |  yellow = same"));
+    pairsCardLayout->addWidget(explanation);
+    pairsCardLayout->addWidget(gerberPairList_);
+    pairsCardLayout->addWidget(skippedUnrecognizedLabel_);
+    pairsCardLayout->addWidget(skippedUnrecognizedButtonRow_);
+    pairsCardLayout->addWidget(skippedDrillLabel_);
 
-    leftColumnLayout->addWidget(explanation);
-    leftColumnLayout->addWidget(gerberPairList_, 1);
-    leftColumnLayout->addWidget(pairStatusLabel_);
-    leftColumnLayout->addWidget(skippedUnrecognizedLabel_);
-    leftColumnLayout->addWidget(skippedUnrecognizedButtonRow_);
-    leftColumnLayout->addWidget(skippedDrillLabel_);
-    leftColumnLayout->addWidget(renderTimeLabel_);
-    leftColumnLayout->addWidget(legend);
-
+    // Canvas card: the Gerber overlay render, inset in its own card.
+    auto *canvasCard = new QWidget;
+    canvasCard->setObjectName("canvasCard");
+    canvasCard->setAttribute(Qt::WA_StyledBackground, true);
+    auto *canvasCardLayout = new QVBoxLayout(canvasCard);
+    canvasCardLayout->setContentsMargins(8, 8, 8, 8);
     gerberCanvas_ = new CompositeView;
+    canvasCardLayout->addWidget(gerberCanvas_);
 
-    gerberDiffLayout->addWidget(leftColumn, 3);
-    gerberDiffLayout->addWidget(gerberCanvas_, 7);
+    // Detail card: per-pair status text, render time, and the static
+    // overlay color legend - three separate elements sharing one card.
+    auto *detailCard = new QWidget;
+    detailCard->setObjectName("detailCard");
+    detailCard->setAttribute(Qt::WA_StyledBackground, true);
+    auto *detailCardLayout = new QVBoxLayout(detailCard);
+    detailCardLayout->setContentsMargins(14, 10, 14, 10);
+    pairStatusLabel_ = new QLabel;
+    pairStatusLabel_->setObjectName("detailLabel");
+    pairStatusLabel_->setWordWrap(true);
+    renderTimeLabel_ = new QLabel(tr("Render time: -"));
+    renderTimeLabel_->setObjectName("detailLabel");
+    auto *overlayLegend = new QLabel(tr("green = only new  |  red = only old  |  yellow = same"));
+    overlayLegend->setObjectName("detailLabel");
+    detailCardLayout->addWidget(pairStatusLabel_);
+    detailCardLayout->addWidget(renderTimeLabel_);
+    detailCardLayout->addWidget(overlayLegend);
 
-    layout->addWidget(gerberDiffContent_, 3);
+    rightColumn->addWidget(pairsCard);
+    rightColumn->addWidget(canvasCard, 1);
+    rightColumn->addWidget(detailCard);
+
+    contentRow->addLayout(rightColumn, 1);
+    layout->addLayout(contentRow, 1);
 
     connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
     connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
