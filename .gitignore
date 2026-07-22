@@ -69,3 +69,6 @@ compile_commands.json
 
 # Personal editor settings, not shared project config
 .vscode/
+
+# Confidential real-supplier test archives, local-only (per CLAUDE.md)
+/Test_data/
