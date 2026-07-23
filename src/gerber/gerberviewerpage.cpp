@@ -5,7 +5,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QTextStream>
 #include <QVBoxLayout>
 
 #include "../common/filepicker.h"
@@ -63,13 +62,14 @@ void GerberViewerPage::openFile()
         statusLabel_->setText(tr("Could not read %1").arg(QFileInfo(filePath).fileName()));
         return;
     }
-    QTextStream stream(&file);
-    const QString content = stream.readAll();
+    const QByteArray bytes = file.readAll();
+    const QString content = QString::fromUtf8(bytes);
 
-    // Dispatch by extension, same rule as ArchiveComparePage::
+    // Dispatch by extension (or, for an ambiguous extension, by sniffing
+    // content for an Excellon header), same rule as ArchiveComparePage::
     // parseGerberOrDrill - a drill file needs ExcellonParser, not
     // GerberParser, which doesn't speak Excellon syntax at all.
-    if (GerberFileType::isDrillFile(filePath)) {
+    if (GerberFileType::isDrillFile(filePath, bytes)) {
         try {
             layer_ = ExcellonParser::parseContentToObjects(content);
         } catch (const ExcellonParser::AmbiguousFormatError &error) {

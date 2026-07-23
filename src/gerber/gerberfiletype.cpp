@@ -39,6 +39,24 @@ QSettings makeSettings()
 
 constexpr auto kUserExtensionsKey = "gerber/userRecognizedExtensions";
 
+// Cheap line-based sniff for a genuine Excellon drill file: its header
+// conventionally opens with a bare "M48" token line, which no RS-274X
+// Gerber layer or plain-text CAM report would ever contain. Only the
+// first 40 lines are scanned - a real header appears immediately, and a
+// stray coincidental match deep inside an otherwise-Gerber file isn't
+// worth chasing.
+bool contentLooksLikeExcellon(const QByteArray &content)
+{
+    const QStringList lines = QString::fromUtf8(content).split(QLatin1Char('\n'));
+    const int scanLimit = qMin(lines.size(), 40);
+    for (int i = 0; i < scanLimit; ++i) {
+        if (lines.at(i).trimmed().compare(QLatin1String("M48"), Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 bool GerberFileType::isRecognized(const QString &fileName)
@@ -65,6 +83,14 @@ bool GerberFileType::isDrillFile(const QString &fileName)
 {
     const QString extension = QFileInfo(fileName).suffix().toLower();
     return extension == QStringLiteral("drl") || extension == QStringLiteral("xln");
+}
+
+bool GerberFileType::isDrillFile(const QString &fileName, const QByteArray &content)
+{
+    if (isDrillFile(fileName)) {
+        return true;
+    }
+    return contentLooksLikeExcellon(content);
 }
 
 void GerberFileType::addUserExtension(const QString &extension)

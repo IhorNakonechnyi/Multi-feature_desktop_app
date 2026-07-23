@@ -321,7 +321,7 @@ Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, const QStr
         return Layer{};
     }
     const QString content = QString::fromUtf8(bytes);
-    if (!GerberFileType::isDrillFile(relativePath)) {
+    if (!GerberFileType::isDrillFile(relativePath, bytes)) {
         return GerberParser::parseContentToObjects(content);
     }
     try {

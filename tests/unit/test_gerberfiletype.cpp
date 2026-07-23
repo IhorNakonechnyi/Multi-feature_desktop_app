@@ -25,6 +25,9 @@ private slots:
     void drillExtensionsAreRecognizedAsDrillFiles();
     void gerberExtensionIsNotADrillFile();
     void emptyExtensionIsNotADrillFile();
+    void txtExtensionWithM48HeaderIsADrillFile();
+    void txtExtensionWithoutM48HeaderIsNotADrillFile();
+    void drlExtensionIsADrillFileEvenWithUnrelatedContent();
 
 private:
     QTemporaryDir settingsDir_;
@@ -74,6 +77,30 @@ void TestGerberFileType::gerberExtensionIsNotADrillFile()
 void TestGerberFileType::emptyExtensionIsNotADrillFile()
 {
     QVERIFY(!GerberFileType::isDrillFile("noextension"));
+}
+
+// Real supplier files have shown up with genuine Excellon content under a
+// .txt extension (e.g. "347128-C_EX.TXT") - the extension-only overload
+// can't catch this, so the content-aware overload must sniff the M48
+// header instead of trusting the extension.
+void TestGerberFileType::txtExtensionWithM48HeaderIsADrillFile()
+{
+    const QByteArray content = "M48\nINCH,LZ\nT01C0.030\n%\nT01\nX010Y010\nM30\n";
+    QVERIFY(GerberFileType::isDrillFile("347128-C_EX.TXT", content));
+}
+
+void TestGerberFileType::txtExtensionWithoutM48HeaderIsNotADrillFile()
+{
+    const QByteArray content = "This is just a plain-text CAM tool report, not a drill file.\n";
+    QVERIFY(!GerberFileType::isDrillFile("readme.txt", content));
+}
+
+void TestGerberFileType::drlExtensionIsADrillFileEvenWithUnrelatedContent()
+{
+    // The .drl/.xln fast path must not require content sniffing at all -
+    // classification elsewhere (GerberDiffTrigger) runs before any bytes
+    // are read.
+    QVERIFY(GerberFileType::isDrillFile("board.drl", QByteArray()));
 }
 
 QTEST_MAIN(TestGerberFileType)
