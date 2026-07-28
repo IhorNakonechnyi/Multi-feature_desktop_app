@@ -13,6 +13,13 @@ enum class EntryClassification {
     OnlyInThisArchive
 };
 
+// Why a pair was formed (Q1 "pair provenance"): yellow means the app assumed
+// something, and the assumption must be inspectable in the pair list.
+enum class PairReason {
+    SameName,               // leaf filenames matched (case-insensitive)
+    OnlyExtensionCandidate, // elimination: exactly one class per side with this extension
+};
+
 // One classified file as it will appear in ONE archive's tree pane.
 // relativePath is the file's full path within its own archive (a nested
 // zip's own name becomes a path segment, so a file inside a nested zip
@@ -20,17 +27,20 @@ enum class EntryClassification {
 struct ArchiveEntry {
     QString relativePath;
     quint64 sizeBytes = 0;
+    quint32 crc32 = 0;   // half of the (crc32, size) content-class key. Internal
+                         // plumbing for class counting (Q8 summary) - never displayed (Q9).
     EntryClassification classification = EntryClassification::Identical;
 };
 
 // A file classified Different on both sides, naming which A-file pairs
 // with which B-file. Needed explicitly (not inferred from equal paths)
-// because CrcComparator's filename-fallback pass can match two files that
-// sit at different paths in each archive (see the path-tolerant-matching
-// design doc).
+// because content-first matching's name pass or extension pass can match
+// two files that sit at different paths in each archive (see the
+// path-tolerant-matching design doc).
 struct DifferingPair {
     QString relativePathA;
     QString relativePathB;
+    PairReason reason = PairReason::SameName;
 };
 
 // Two independent, flat, per-archive file lists (data-model.md's
