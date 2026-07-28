@@ -413,6 +413,50 @@ UI/glue — no unit tests (constitution P4); the gate is manual.
 - [ ] **Step 6: Build + manual gate** — `cmake --build build`, run the app (`build/…/pcb-gadget.exe` — find the exe under `build`, or use the project run skill): load `Test_data/test_pair_3` (both sides). Expect: trees populate, legend says "only in A/only in B", compare time shows, exactly 1 pair listed **with " - same name" suffix**. Then pick a non-zip file renamed `.zip` on one side: inline error text on that panel, no dialog, other panel unaffected.
 - [ ] **Step 7: Commit** — `git commit -am "Page: orchestrator wiring, inline errors, A/B symmetry, pair reasons, compare timing"`
 
+### Task 8b: clear both trees when either archive fails to load
+
+**Added 2026-07-28 during execution, at Igor's explicit request.** Not from Q1–Q15 — a
+**pre-existing** bug surfaced by Task 8's review, which verified the same behaviour at `9977c2f`
+(pre-task), so it is inherited rather than a regression.
+
+**The bug.** Both archives load successfully, so both trees populate with classification colouring.
+The user then re-picks one side to something unreadable. That side's tree is cleared by
+`ArchivePanel::showError`, but `runComparison` returns before `showEntries` is reached, and
+`clearError` only hides the other panel's label — so **the other panel keeps the previous run's
+colour-coded tree, describing a comparison against an archive that is no longer loaded.** Green there
+now means "identical to an archive you can't see and didn't pick", which is worse than showing
+nothing.
+
+This is precisely the failure mode `archivecomparepage.cpp:224-227` already guards against for the
+canvas, layers, and render-time label ("cleared unconditionally, before either early return below:
+a re-pick that turns out empty or unreadable must not leave a previous pair's stale overlay on
+screen"). The discipline was simply never extended to the trees.
+
+**Files:**
+- Modify: `src/archivecompare/archivecomparepage.cpp` (`runComparison`), and
+  `src/archivecompare/archivepanel.{h,cpp}` if a tree-clearing entry point is needed
+
+- [ ] **Step 1: Implement.** Extend the existing unconditional-cleanup block so **both** panels' trees
+  are emptied at the top of `runComparison`, alongside the canvas/layer/label resets, before either
+  early return. A successful comparison repopulates them a few lines later, so the only visible effect
+  is on the failure paths. Prefer this over clearing inside the error branches — one unconditional
+  reset is easier to keep correct than two symmetric branch-local ones, and it matches the reasoning
+  already written in the comment above that block. Extend that comment to say the trees are included
+  and why.
+- [ ] **Step 2: Verify no stale state survives any early return.** Read `runComparison` top to bottom
+  and confirm every `return` is preceded by the reset: the both-paths-empty return, the A-error
+  return, the B-error return, and the both-error return.
+- [ ] **Step 3: Build and run the full suite.** `cmake --build build`, then
+  `ctest --test-dir build -C Debug --output-on-failure` — 15/15 green. This is UI/glue, so there are
+  no unit tests for it; the suite run is a regression check only.
+- [ ] **Step 4: Manual gate.** Load both archives from `Test_data/test_pair_3/` and confirm both trees
+  populate. Then re-pick **one** side to a non-zip file renamed `.zip`. Expect: the inline error on
+  that panel, **and the other panel's tree now empty** rather than showing the previous run's
+  colouring. Re-pick that side back to the valid archive and confirm both trees repopulate and the
+  error clears. `Test_data/` is confidential — describe observations structurally, never record real
+  filenames or contents.
+- [ ] **Step 5: Commit** — `git commit -am "Clear both trees when either archive fails to load"`
+
 ---
 
 # Milestone D — Content-based drawability (Q2) + extension mechanism deleted (Q12)
