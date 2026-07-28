@@ -44,10 +44,18 @@ QVector<RawFileEntry> readArchive(const QString &filePath);
 // itself a real filesystem path to the top-level archive). entryRelativePath
 // is one of the RawFileEntry::relativePath values readArchive produces,
 // which may cross into a nested zip (e.g. "wrapper/archive3.zip/top.gtl") -
-// see readArchive's own recursion. Returns an empty QByteArray if the entry
-// can't be found or read; unlike readArchive, this doesn't throw - a single
+// see readArchive's own recursion. The path is resolved one step at a time
+// against whatever entries the current zip level actually has (see
+// resolveStep() in archivereader.cpp) - it is never guessed from ".zip"
+// appearing in the name. Returns an empty QByteArray if the entry can't be
+// found or read; unlike readArchive, this doesn't throw - a single
 // missing/corrupt entry when opening the Gerber diff view isn't as
 // catastrophic as failing to open the whole archive.
-QByteArray readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath);
+//
+// An empty result is ambiguous on its own (missing entry vs. a genuinely
+// zero-byte entry) - pass `found` to tell them apart: set to false when no
+// matching entry exists or it couldn't be read, true otherwise. Defaulted
+// to nullptr so existing call sites that don't care compile unchanged.
+QByteArray readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath, bool *found = nullptr);
 
 } // namespace ArchiveReader
