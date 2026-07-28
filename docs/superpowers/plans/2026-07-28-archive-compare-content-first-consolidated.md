@@ -19,8 +19,21 @@
 - **Style (user preference):** intricate logic (comparator, orchestrator) uses simple structures + more explanatory comments than terse default.
 - **Colours contract (Q1):** green = nothing to do; yellow = app *assumes* correspondence and content differs (always in cross-archive pairs); red = no counterpart. A/B are symmetric slots — no "new"/"old" wording anywhere.
 - **Commits stay on branch `archive-compare-content-first`.** Never commit to `main`; never push (user gate).
-- Build/test: `cmake --build build` · `ctest --test-dir build --output-on-failure`. The build tree is already configured — **do not re-run `cmake -S . -B build` unless it is missing**, and if you must, it needs the Qt prefix or `find_package(Qt6)` fails: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64`.
-- **Never judge a build or test run by a piped exit code** (`cmake --build build | tail` reports the *pipe's* status, so a failed build looks like success). Redirect to a file and check the real exit code, or run the command unpiped and read its output.
+- **Build and test — use exactly these commands.** The build tree is already configured; baseline is green at 14/14.
+
+```bash
+cmake --build build > /tmp/build.log 2>&1; echo "BUILD EXIT: $?"   # then read the log on failure
+export PATH="/c/Qt/6.8.2/msvc2022_64/bin:$PWD/build/Debug:$PATH"    # required, see below
+ctest --test-dir build -C Debug --output-on-failure                 # -C Debug is required
+ctest --test-dir build -C Debug -R archivereader --output-on-failure # single target
+```
+
+  Three environment facts, each of which otherwise costs a wasted debugging round:
+  1. **`-C Debug` is mandatory** — this is the multi-config MSVC generator, so without it every test reports `Not Run`.
+  2. **Qt's `bin` must be on `PATH`** or every test exits `0xc0000135` (DLL not found). That is a missing DLL, *not* a broken test.
+  3. **Never judge a build by a piped exit code** — `cmake --build build | tail` reports the *pipe's* status, so a failed build reads as success. Redirect to a file and check `$?`.
+
+  Only if `build/` is missing, reconfigure with the Qt prefix (omitting it makes `find_package(Qt6)` fail): `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64`.
 - Windows note: this worktree path is deep; if a test target hits MAX_PATH, report it — do not silently skip.
 
 ## Milestone map
