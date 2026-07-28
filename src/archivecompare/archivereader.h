@@ -58,4 +58,15 @@ QVector<RawFileEntry> readArchive(const QString &filePath);
 // to nullptr so existing call sites that don't care compile unchanged.
 QByteArray readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath, bool *found = nullptr);
 
+// Same resolution walk as readEntryBytes (including through nested zips -
+// see readEntryBytes above), but only reads at most maxBytes of the final
+// entry instead of the whole thing. Intermediate nested-zip levels must
+// still be read in full to be opened at all - only the *final* entry's read
+// is capped. Used by callers (e.g. content-sniffing a candidate drawable
+// file) that only need a small prefix and want to avoid pulling a large
+// entry entirely into memory just to look at its first few bytes. Same
+// `found` semantics as readEntryBytes.
+QByteArray readEntryHead(const QString &archiveFilePath, const QString &entryRelativePath, qint64 maxBytes,
+                          bool *found = nullptr);
+
 } // namespace ArchiveReader

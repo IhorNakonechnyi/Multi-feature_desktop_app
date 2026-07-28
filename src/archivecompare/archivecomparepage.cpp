@@ -340,8 +340,10 @@ void ArchiveComparePage::showSelectedPair()
     }
     const DifferingPair &pair = eligiblePairs_.at(row);
 
-    const QByteArray bytesA = ArchiveReader::readEntryBytes(panelA_->archivePath(), pair.relativePathA);
-    const QByteArray bytesB = ArchiveReader::readEntryBytes(panelB_->archivePath(), pair.relativePathB);
+    bool foundA = false;
+    bool foundB = false;
+    const QByteArray bytesA = ArchiveReader::readEntryBytes(panelA_->archivePath(), pair.relativePathA, &foundA);
+    const QByteArray bytesB = ArchiveReader::readEntryBytes(panelB_->archivePath(), pair.relativePathB, &foundB);
 
     QString parseErrorA;
     QString parseErrorB;
@@ -357,7 +359,22 @@ void ArchiveComparePage::showSelectedPair()
     const QRectF boundsB = GerberObjectPaths::layerBoundsMm(shownLayerB_);
     const QRectF unitedBounds = boundsA.united(boundsB);
 
-    if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
+    // A read failure (found == false) is checked before parse errors and
+    // before the "no drawable content" bounds checks below: parseGerberOrDrill
+    // returns an empty Layer with no parseError for empty bytes (its own
+    // comment says as much), so a read failure would otherwise silently fall
+    // through to "Neither side has drawable content" - blaming the file's
+    // content when the file was never actually read. That message must stay
+    // reserved for a file that WAS read and parsed to nothing.
+    if (!foundA) {
+        pairStatusLabel_->setText(
+            tr("Could not read \"%1\" from archive %2.")
+                .arg(pair.relativePathA, QFileInfo(panelA_->archivePath()).fileName()));
+    } else if (!foundB) {
+        pairStatusLabel_->setText(
+            tr("Could not read \"%1\" from archive %2.")
+                .arg(pair.relativePathB, QFileInfo(panelB_->archivePath()).fileName()));
+    } else if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
         pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2.").arg(parseErrorA, parseErrorB));
     } else if (!parseErrorA.isEmpty()) {
         pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing old file only.").arg(parseErrorA));

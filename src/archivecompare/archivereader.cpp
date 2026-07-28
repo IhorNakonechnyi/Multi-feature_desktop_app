@@ -1,5 +1,7 @@
 #include "archivereader.h"
 
+#include <functional>
+
 #include <QBuffer>
 #include <QFileInfo>
 #include <QObject>
@@ -49,31 +51,52 @@ void readEntriesFrom(QuaZip &zip, const QString &pathPrefix, QVector<ArchiveRead
 
         const QString fullPath = pathPrefix.isEmpty() ? entryName : pathPrefix + QLatin1Char('/') + entryName;
 
-        if (isNestedArchiveName(entryName)) {
-            QuaZipFile nestedFile(&zip);
-            if (!nestedFile.open(QIODevice::ReadOnly)) {
-                continue; // unreadable nested archive - skip it, don't fail the whole read
-            }
-            QByteArray nestedBytes = nestedFile.readAll();
-            nestedFile.close();
-
-            QBuffer buffer(&nestedBytes);
-            if (!buffer.open(QIODevice::ReadOnly)) {
-                continue;
-            }
-
-            QuaZip nestedZip(&buffer);
-            if (nestedZip.open(QuaZip::mdUnzip)) {
-                readEntriesFrom(nestedZip, fullPath, out);
-                nestedZip.close();
-            }
-            buffer.close();
-        } else {
+        // Shared by both the "it's a plain file" branch below and every
+        // fallback path in the nested-archive branch: append this entry as
+        // an ordinary file, using the crc32/sizeBytes already in hand from
+        // the central directory (`info`) - no re-reading needed.
+        auto appendAsPlainFile = [&]() {
             ArchiveReader::RawFileEntry entry;
             entry.relativePath = fullPath;
             entry.crc32 = info.crc;
             entry.sizeBytes = info.uncompressedSize;
             out.append(entry);
+        };
+
+        if (isNestedArchiveName(entryName)) {
+            // ".zip" in the name is only a cheap candidate filter (see
+            // isNestedArchiveName) - it's never proof the entry actually IS
+            // a nested archive. Content decides: try to open it as one, and
+            // if any step fails (unreadable entry, or bytes that just don't
+            // parse as a zip - a corrupt nested archive, or a plain file
+            // that merely happens to be named ".zip"), fall through to
+            // listing it as an ordinary file instead of silently dropping
+            // it. Previously every one of these failure paths just
+            // `continue`d, which meant the entry never appeared anywhere -
+            // not in the tree, not compared, not counted.
+            bool openedAsNestedArchive = false;
+            QuaZipFile nestedFile(&zip);
+            if (nestedFile.open(QIODevice::ReadOnly)) {
+                QByteArray nestedBytes = nestedFile.readAll();
+                nestedFile.close();
+
+                QBuffer buffer(&nestedBytes);
+                if (buffer.open(QIODevice::ReadOnly)) {
+                    QuaZip nestedZip(&buffer);
+                    if (nestedZip.open(QuaZip::mdUnzip)) {
+                        readEntriesFrom(nestedZip, fullPath, out);
+                        nestedZip.close();
+                        openedAsNestedArchive = true;
+                    }
+                    buffer.close();
+                }
+            }
+
+            if (!openedAsNestedArchive) {
+                appendAsPlainFile();
+            }
+        } else {
+            appendAsPlainFile();
         }
     } while (zip.goToNextFile());
 }
@@ -160,25 +183,16 @@ ResolvedStep resolveStep(QuaZip &zip, const QString &normalizedRemaining)
     return ResolvedStep{QString(), false, QString()};
 }
 
-} // namespace
-
-QVector<ArchiveReader::RawFileEntry> ArchiveReader::readArchive(const QString &filePath)
-{
-    QuaZip zip(filePath);
-    if (!zip.open(QuaZip::mdUnzip)) {
-        throw ArchiveOpenError(
-            QObject::tr("Could not open \"%1\" - it may be corrupt, password-protected, "
-                        "or not a valid zip file.")
-                .arg(QFileInfo(filePath).fileName()));
-    }
-
-    QVector<RawFileEntry> entries;
-    readEntriesFrom(zip, QString(), entries);
-    zip.close();
-    return entries;
-}
-
-QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath, bool *found)
+// Shared by readEntryBytes and readEntryHead: both resolve entryRelativePath
+// one step at a time via resolveStep, descending into nested zips exactly
+// the same way - the only difference between the two public functions is
+// what to do with the *final* entry once found (read it all vs. read only a
+// prefix), which `finalRead` supplies. Every intermediate nested-zip level
+// still has to be read in full regardless of which public function is
+// calling - a nested zip has to be opened whole before it can be walked
+// into further, there's no way to peek at just part of it.
+QByteArray readEntryWalk(const QString &archiveFilePath, const QString &entryRelativePath, bool *found,
+                          const std::function<QByteArray(QuaZipFile &)> &finalRead)
 {
     if (found) {
         *found = false;
@@ -216,14 +230,14 @@ QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const Q
         if (!file.open(QIODevice::ReadOnly)) {
             return QByteArray();
         }
-        const QByteArray bytes = file.readAll();
-        file.close();
 
         if (step.isFinal) {
+            const QByteArray result = finalRead(file);
+            file.close();
             if (found) {
                 *found = true;
             }
-            return bytes;
+            return result;
         }
 
         // Not final - step.storedName matched a path prefix, so it must
@@ -232,6 +246,9 @@ QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const Q
         // e.g. a non-zip file that just happens to share a name prefix),
         // the path is bogus - report not found rather than returning
         // unrelated bytes.
+        const QByteArray bytes = file.readAll();
+        file.close();
+
         currentArchiveBytes = bytes;
         nestedBuffer.reset(new QBuffer(&currentArchiveBytes));
         if (!nestedBuffer->open(QIODevice::ReadOnly)) {
@@ -244,4 +261,35 @@ QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const Q
         currentZip = nestedZip.data();
         remainingPath = step.rest;
     }
+}
+
+} // namespace
+
+QVector<ArchiveReader::RawFileEntry> ArchiveReader::readArchive(const QString &filePath)
+{
+    QuaZip zip(filePath);
+    if (!zip.open(QuaZip::mdUnzip)) {
+        throw ArchiveOpenError(
+            QObject::tr("Could not open \"%1\" - it may be corrupt, password-protected, "
+                        "or not a valid zip file.")
+                .arg(QFileInfo(filePath).fileName()));
+    }
+
+    QVector<RawFileEntry> entries;
+    readEntriesFrom(zip, QString(), entries);
+    zip.close();
+    return entries;
+}
+
+QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath, bool *found)
+{
+    return readEntryWalk(archiveFilePath, entryRelativePath, found,
+                          [](QuaZipFile &file) { return file.readAll(); });
+}
+
+QByteArray ArchiveReader::readEntryHead(const QString &archiveFilePath, const QString &entryRelativePath,
+                                         qint64 maxBytes, bool *found)
+{
+    return readEntryWalk(archiveFilePath, entryRelativePath, found,
+                          [maxBytes](QuaZipFile &file) { return file.read(maxBytes); });
 }
