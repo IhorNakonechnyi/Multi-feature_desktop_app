@@ -11,7 +11,7 @@ SidebarNav::SidebarNav(QWidget *parent)
     // currentRowChanged is wired directly to setCurrentIndex.
     addItem(new QListWidgetItem(QIcon(":/icons/archive-compare.svg"), tr("Archive compare")));
     addItem(new QListWidgetItem(QIcon(":/icons/supplier-advisor.svg"), tr("Supplier advisor")));
-    addItem(new QListWidgetItem(QIcon(":/icons/gerber-viewer.svg"), tr("Gerber viewer")));
+    addItem(new QListWidgetItem(QIcon(":/icons/gerber-viewer.svg"), tr("PCB Sage")));
     addItem(new QListWidgetItem(QIcon(":/icons/quote-compare.svg"), tr("Quote compare")));
 
     // Only Archive Compare has real functionality today - the other 3 are
