@@ -19,7 +19,8 @@
 - **Style (user preference):** intricate logic (comparator, orchestrator) uses simple structures + more explanatory comments than terse default.
 - **Colours contract (Q1):** green = nothing to do; yellow = app *assumes* correspondence and content differs (always in cross-archive pairs); red = no counterpart. A/B are symmetric slots — no "new"/"old" wording anywhere.
 - **Commits stay on branch `archive-compare-content-first`.** Never commit to `main`; never push (user gate).
-- Build/test: `cmake --build build` · `ctest --test-dir build --output-on-failure`. First configure: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`.
+- Build/test: `cmake --build build` · `ctest --test-dir build --output-on-failure`. The build tree is already configured — **do not re-run `cmake -S . -B build` unless it is missing**, and if you must, it needs the Qt prefix or `find_package(Qt6)` fails: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64`.
+- **Never judge a build or test run by a piped exit code** (`cmake --build build | tail` reports the *pipe's* status, so a failed build looks like success). Redirect to a file and check the real exit code, or run the command unpiped and read its output.
 - Windows note: this worktree path is deep; if a test target hits MAX_PATH, report it — do not silently skip.
 
 ## Milestone map
@@ -151,7 +152,7 @@ struct ArchiveEntry {
 - [ ] **Step 3: Run full ctest** — all green (no behavior changed yet).
 - [ ] **Step 4: Commit** — `git commit -am "Data model: PairReason on DifferingPair, crc32 carried on ArchiveEntry"`
 
-### Task 4: comparator rewrite — classes, duplicate collapse, content match
+### Task 4: comparator rewrite — classes, duplicate collapse, content match, name pass
 
 **Files:**
 - Modify: `src/archivecompare/crccomparator.cpp` (full rewrite), `src/archivecompare/crccomparator.h` (doc comment: content-first, cite the design doc; signature unchanged)
@@ -161,12 +162,15 @@ struct ArchiveEntry {
 - Consumes: `ArchiveReader::RawFileEntry` (`relativePath`, `crc32`, `sizeBytes`).
 - Produces: `CrcComparator::compare(entriesA, entriesB)` — **output entry order mirrors input order, index for index** (Milestone C's orchestrator depends on this to map results back to raw entries).
 
-**Algorithm (design doc steps 1–3; steps 4–6 are Task 5):**
+**Algorithm (design doc steps 1–4; the extension pass, step 5, is Task 5):**
 
 1. Per archive, group entry indices by class key `(crc32, sizeBytes)`.
 2. Per class, the **representative** is the member with the fewest `/` in its path; ties broken by case-insensitive path compare. Every non-representative member is classified `Identical` (plain green — no marker, per Q9) *unconditionally, whatever happens to the class*.
 3. A class whose key exists in both archives → representative (and members) `Identical` on both sides. No pair.
-4. (Task 5) leftover classes → name pass → extension pass → red.
+4. **Name pass** over leftover classes: group by the representative's leaf filename, lowercased. A name present on both sides → every A-class and B-class under it goes `Different` (representatives; other members stay green), and **every A-class × B-class combination** becomes a pair with `PairReason::SameName`. This replaces the old "multiple distinct-CRC candidates → ambiguous → unmatched" rule.
+5. Everything still unplaced → `OnlyInThisArchive` for now (Task 5 inserts the extension pass ahead of this).
+
+**Why the name pass lands here rather than in Task 5:** the old algorithm's Pass 1 paired same-path files, and same path implies same leaf name — so every pre-existing "different" test is covered by the name pass and by nothing before it. Splitting it out would leave this task's suite red and force `QSKIP`s that Task 5 then removes. **No task in this plan may leave a skipped or failing test behind.**
 
 - [ ] **Step 1: Replace the old locked-in tests and write the new ones.** In `tests/unit/test_archivecomparator.cpp`: **delete** `sameNameDifferentCrcStillTreatedAsSelfDuplicate` (it locks the old rule the design retires) and any test asserting Pass-2's "ambiguous → unmatched" behavior (grep the file for `ambiguous` / `selfDuplicate` and read each test against the new design; keep plain identical/different/only-in-one cases). Add:
 
@@ -183,9 +187,18 @@ void representativeTieAlphabetical(); // A: {"b.gtl",7,100},{"a.gtl",7,100}; B: 
                                       //   → "a.gtl" red, "b.gtl" green
 void duplicateOfRedClassIsGreen();    // covered by representativeIsShallowestPath asserts; keep explicit:
                                       //   the non-representative is Identical while representative is red
-void sameCrcDifferentSizeNotMatched();// A: {"x.gtl",7,100} B: {"x.gtl",7,999} → NOT content-matched
-                                      //   (falls to Task 5's name pass; for now assert not Identical-by-content:
-                                      //    classification != Identical)
+void sameCrcDifferentSizeNotMatched();// A: {"x.gtl",7,100} B: {"x.gtl",7,999} → NOT content-matched;
+                                      //   the name pass then pairs them → both Different, 1 pair
+void samePathDifferentContentPairsByName(); // A/B both "drill.txt", differing crc → 1 pair,
+                                      //   both Different, reason SameName (covers the old Pass-1 behaviour)
+void namePassCrossProductOneToTwo();  // A: 1 class "x.gtl"; B: 2 distinct-content classes named "x.gtl"
+                                      //   → 2 pairs (A-rep × each B-rep), 3 entries Different
+void namePassIsCaseInsensitive();     // "TOP.GTL" vs "top.gtl" pairs
+void classMatchedUnderRepresentativeName(); // A class members {"sub/x.gtl","other.gtl"} (same content):
+                                      //   representative is "other.gtl" (shallower). B: {"other.gtl", differing crc}
+                                      //   → pairs under "other.gtl"; "x.gtl"'s name never enters matching
+void duplicateOfYellowClassIsGreen(); // A: {"x.gtl",7},{"copy/x.gtl",7}; B: {"x.gtl",9}
+                                      //   → A rep Different, A copy Identical, 1 pair
 ```
 
 - [ ] **Step 2: Verify new tests fail** — `ctest --test-dir build -R archivecomparator --output-on-failure` (rename/relocation cases fail under the old path-keyed algorithm).
@@ -207,52 +220,45 @@ ClassMap buildClasses(const QVector<RawFileEntry> &entries);
 }
 ```
 
-`compare()`: size both output vectors, copy `relativePath`/`sizeBytes`/`crc32` for every entry; mark all non-representatives `Identical`; content-match classes across archives (shared key → representatives `Identical`); collect unmatched class keys per side for Task 5 (for now, classify their representatives `OnlyInThisArchive` and emit no pairs — Task 5 replaces that stub with the name/extension passes). Delete `selfDuplicateIndices`, `groupByFilenameAndCrc`, `crcByPath`, and their comments.
+`compare()`: size both output vectors, copy `relativePath`/`sizeBytes`/`crc32` for every entry; mark all non-representatives `Identical`; content-match classes across archives (shared key → representatives `Identical`); run the name pass over what's left; anything still unplaced → `OnlyInThisArchive`. Delete `selfDuplicateIndices`, `groupByFilenameAndCrc`, `crcByPath`, and their comments.
 
-- [ ] **Step 4: Run** — Task 4's tests pass. Pre-existing exact-path identical/different cases: identical passes; *different* cases now rely on the Task 5 name pass — mark any such failing pre-existing test with a `QSKIP("re-enabled in name-pass task")` and a comment, listing them in the commit message.
-- [ ] **Step 5: Commit** — `git commit -am "CrcComparator: content classes, duplicate collapse, content match (Q1 steps 1-3)"`
+- [ ] **Step 4: Run** — `ctest --test-dir build -R archivecomparator --output-on-failure`: every new case passes **and every pre-existing case passes**, none skipped. Then full `ctest --test-dir build --output-on-failure`.
+- [ ] **Step 5: Commit** — `git commit -am "CrcComparator: content classes, duplicate collapse, content match, name pass (Q1)"`
 
-### Task 5: name pass, extension pass, pair reasons
+### Task 5: extension elimination pass
 
 **Files:**
 - Modify: `src/archivecompare/crccomparator.cpp`
 - Test: `tests/unit/test_archivecomparator.cpp`
 
 **Interfaces:**
+- Consumes: Task 4's `compare()` — this task inserts one pass between its name pass and its final `OnlyInThisArchive` assignment.
 - Produces: `differingPairs` entries carry representative paths and a correct `PairReason`. Invariant for consumers: *no orphan yellow* — every `Different` entry belongs to ≥1 pair.
 
-**Algorithm (design doc steps 4–6):**
+**Algorithm (design doc step 5):** group classes still unplaced after the name pass by `QFileInfo(representativePath).suffix().toLower()`; classes with an **empty** suffix are skipped (no key to eliminate on). A suffix with **exactly one** class on each side → pair them, both `Different`, `PairReason::OnlyExtensionCandidate`. Two or more candidates on either side → leave red, never guess.
 
-- **Name pass:** group leftover classes (each side) by representative's leaf filename, lowercased. A name present on both sides → every A-class and B-class under it becomes `Different` (representatives; other members stay green), and **every A-class × B-class combination** becomes a pair (`PairReason::SameName`).
-- **Extension pass:** group what remains by `QFileInfo(path).suffix().toLower()`; classes with an **empty** suffix are skipped (no key to eliminate on). A suffix with **exactly one** class on each side → pair them, `Different`, `PairReason::OnlyExtensionCandidate`. Two or more candidates on either side → leave red, never guess.
-- **Everything else:** `OnlyInThisArchive`.
+This is an elimination argument, not evidence, so the guard is deliberately stricter than the name pass's: no cross product. Extension is a weak key — in real archives an entire layer set frequently shares one generic extension.
 
-- [ ] **Step 1: Write failing tests** (the design doc's test list; worked examples 1–5 from its "Worked examples" section give the fixtures):
+- [ ] **Step 1: Write failing tests**:
 
 ```cpp
-void samePathDifferentContentPairsByName();  // A/B both "drill.txt" different crc → 1 pair, both Different,
-                                             //   reason SameName  (re-enable any QSKIPped Task-4 case here)
-void namePassCrossProductOneToTwo();         // A: 1 class "x.gtl"; B: 2 distinct-content classes named "x.gtl"
-                                             //   → 2 pairs (A-rep × each B-rep), 3 entries Different
-void namePassIsCaseInsensitive();            // "TOP.GTL" vs "top.gtl" pairs
-void classMatchedUnderRepresentativeName();  // A class members {"sub/x.gtl","other.gtl"} (same content):
-                                             //   representative is "other.gtl" (shallower). B: {"other.gtl", differing crc}
-                                             //   → pairs under "other.gtl"; "x.gtl"'s name never enters matching
-void extensionPassSingleCandidates();        // A: "old_name.gtl"(7) B: "new_name.gtl"(9), no name match
-                                             //   → 1 pair, reason OnlyExtensionCandidate
-void extensionPassRefusesTwoCandidates();    // A: two leftover .gtl classes, B: one → all three red, no pair
-void extensionPassSkipsNoExtension();        // leftover files without a suffix never pair by elimination
-void duplicateOfYellowClassIsGreen();        // A: {"x.gtl",7},{"copy/x.gtl",7}; B: {"x.gtl",9}
-                                             //   → A rep Different, A copy Identical, 1 pair
-void noOrphanYellow();                       // walk every fixture above: each Different entry's path appears
-                                             //   in >=1 differingPairs side
-void pairReasonRecorded();                   // SameName vs OnlyExtensionCandidate asserted explicitly
+void extensionPassSingleCandidates();     // A: "old_name.gtl"(crc 7) B: "new_name.gtl"(crc 9), no name match
+                                          //   → 1 pair, both Different, reason OnlyExtensionCandidate
+void extensionPassRefusesTwoCandidates(); // A: two leftover .gtl classes, B: one → all three
+                                          //   OnlyInThisArchive, no pair
+void extensionPassSkipsNoExtension();     // leftover files without a suffix → never paired by elimination
+void extensionPassIsCaseInsensitive();    // "a.GTL" vs "b.gtl" → paired
+void nameePassWinsOverExtensionPass();    // a class placeable by name is never re-paired by extension:
+                                          //   reason stays SameName
+void noOrphanYellow();                    // across every fixture in this file: each Different entry's path
+                                          //   appears in >=1 differingPairs side
+void pairReasonRecorded();                // SameName vs OnlyExtensionCandidate asserted explicitly
 ```
 
 - [ ] **Step 2: Verify they fail.**
-- [ ] **Step 3: Implement** the two passes, replacing Task 4's stub. Then remove every `QSKIP` added in Task 4.
+- [ ] **Step 3: Implement** the extension pass between the name pass and the final red assignment.
 - [ ] **Step 4: Run the full comparator suite** — all pass, none skipped. Run full ctest — nothing else regressed.
-- [ ] **Step 5: Commit** — `git commit -am "CrcComparator: name pass with cross-product pairs, extension elimination pass (Q1 complete)"`
+- [ ] **Step 5: Commit** — `git commit -am "CrcComparator: extension elimination pass (Q1 complete)"`
 
 ---
 
@@ -576,14 +582,14 @@ Folders get a **light** treatment — a 4 px colored bar at the row's left edge 
 
 Rules (Q10): dragEnter accepts iff the mime data has **exactly one** URL, it `isLocalFile()`, the path ends in `.zip` (case-insensitive), and `QFileInfo(path).isFile()` (rejects folders — including folders named `*.zip`). Everything else → no accept → the OS shows the no-drop cursor. Drop re-validates identically (defense in depth) and otherwise behaves as today. Name-as-candidate-filter here does **not** contradict Q3 — content still decides at read time; a `.zip`-named non-zip reports inline via Task 8's error label. No two-archives-in-one-drop (excluded by the single-URL rule, deliberately).
 
-- [ ] **Step 1: Implement** — shared local helper in `archivepanel.cpp`:
+- [ ] **Step 1: Implement** — create `src/archivecompare/archivedroputil.h` with this as an `inline` function (Task 18 makes `ArchiveHeader` include it too; it is written here as a header from the start so it is never duplicated):
 
 ```cpp
-namespace {
+// archivedroputil.h
 // Q10: the picker has always been *.zip-filtered; drag-drop now agrees.
 // Exactly one local .zip FILE - a folder, a multi-select, or any other
 // type shows the no-drop cursor instead of a post-drop error.
-QString singleDroppedZipPath(const QMimeData *mime)
+inline QString singleDroppedZipPath(const QMimeData *mime)
 {
     const QList<QUrl> urls = mime->urls();
     if (urls.size() != 1 || !urls.first().isLocalFile())
@@ -593,10 +599,9 @@ QString singleDroppedZipPath(const QMimeData *mime)
         return QString();
     return path;
 }
-}
 ```
 
-`dragEnterEvent`: `if (!singleDroppedZipPath(event->mimeData()).isEmpty()) event->acceptProposedAction();`. `dropEvent`: same helper; empty → return; else `setArchivePath(path)`. Add the `<QUrl>`/`<QFileInfo>` includes if missing.
+The header needs `#pragma once` and includes for `<QFileInfo>`, `<QMimeData>`, `<QString>`, `<QUrl>`, `<QList>`. In `archivepanel.cpp`, `dragEnterEvent`: `if (!singleDroppedZipPath(event->mimeData()).isEmpty()) event->acceptProposedAction();`. `dropEvent`: same helper; empty → return; else `setArchivePath(path)`.
 - [ ] **Step 2: Build + manual gate** — drag onto a panel: (a) one zip → accepted, loads; (b) a folder → no-drop cursor; (c) two zips at once → no-drop cursor; (d) a PDF → no-drop cursor; (e) a folder renamed `*.zip` → no-drop cursor.
 - [ ] **Step 3: Commit** — `git commit -am "ArchivePanel: drag-drop accepts exactly one local .zip file (Q10)"`
 
@@ -791,9 +796,10 @@ protected:
 };
 
 // ArchivePanel keeps: tree view + model + delegate + showEntries() + drop
-// support (both header and tree accept drops - move singleDroppedZipPath into
-// a small shared header, e.g. archivedroputil.h, or duplicate the 12 lines
-// with a cross-reference comment - implementer's call, note it in the commit).
+// support. Both header and tree accept drops, so Task 13's singleDroppedZipPath
+// MOVES to a new shared header src/archivecompare/archivedroputil.h (inline
+// function) that both include. Do not duplicate it - one drop rule, one
+// definition.
 // It LOSES: roleLabel_, archivePath_, fileNameLabel_, changeButton_,
 // pickArchive, setArchivePath, archiveChanged - those move to ArchiveHeader.
 // New: void setFilter(const TreeFilter&); bool isEmptyAfterFilter() const;
