@@ -40,11 +40,16 @@ QString leafName(const QString &path)
 
 // Group entries by content class and pick each class's representative:
 // the member with the shallowest path (fewest '/'), ties broken by
-// case-insensitive path comparison. Never archive/central-directory order -
-// the representative must be predictable from the paths alone, not from
-// whatever order the customer's packaging tool happened to emit entries in.
-// Because a nested archive's own name becomes a path segment, a copy sitting
-// at the archive root always beats a copy inside a nested archive.
+// case-insensitive path comparison, and any tie remaining after THAT
+// (paths equal except for case, e.g. "Top.gtl" vs "TOP.GTL") is broken by
+// earlier original index - guaranteed deterministic because memberIndices
+// is always built in ascending index order, so "first candidate seen"
+// below is also "lowest index". Never archive/central-directory order for
+// the depth/case rules above, though - the representative must be
+// predictable from the paths alone, not from whatever order the customer's
+// packaging tool happened to emit entries in. Because a nested archive's
+// own name becomes a path segment, a copy sitting at the archive root
+// always beats a copy inside a nested archive.
 ClassMap buildClasses(const QVector<RawFileEntry> &entries)
 {
     ClassMap classes;
@@ -183,17 +188,19 @@ ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entr
         const QVector<ClassKey> &bKeys = itB.value();
 
         for (const ClassKey &key : aKeys) {
-            result.entriesA[classesA[key].representativeIndex].classification = EntryClassification::Different;
+            result.entriesA[classesA.constFind(key)->representativeIndex].classification =
+                EntryClassification::Different;
             placedA.insert(key);
         }
         for (const ClassKey &key : bKeys) {
-            result.entriesB[classesB[key].representativeIndex].classification = EntryClassification::Different;
+            result.entriesB[classesB.constFind(key)->representativeIndex].classification =
+                EntryClassification::Different;
             placedB.insert(key);
         }
         for (const ClassKey &aKey : aKeys) {
-            const QString &pathA = entriesA.at(classesA[aKey].representativeIndex).relativePath;
+            const QString &pathA = entriesA.at(classesA.constFind(aKey)->representativeIndex).relativePath;
             for (const ClassKey &bKey : bKeys) {
-                const QString &pathB = entriesB.at(classesB[bKey].representativeIndex).relativePath;
+                const QString &pathB = entriesB.at(classesB.constFind(bKey)->representativeIndex).relativePath;
                 result.differingPairs.append({pathA, pathB, PairReason::SameName});
             }
         }

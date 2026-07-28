@@ -37,6 +37,7 @@ private slots:
     void namePassIsCaseInsensitive();
     void classMatchedUnderRepresentativeName();
     void duplicateOfYellowClassIsGreen();
+    void staleInArchiveDuplicateStealsContentMatch();
 };
 
 static ArchiveReader::RawFileEntry make(const QString &path, quint32 crc, quint64 size)
@@ -420,6 +421,34 @@ void TestArchiveComparator::duplicateOfYellowClassIsGreen()
     QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
     QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Different));
     QCOMPARE(result.differingPairs.size(), 1);
+}
+
+// Deliberately accepted consequence of content-match-before-name-pass with
+// no set re-alignment (design doc "Explicitly out of scope -> Mixed-
+// revision archives"): a stale, byte-identical-to-B copy left inside A
+// "steals" the content match away from A's genuinely current file, because
+// content matching is name-blind and doesn't know which copy is current.
+// A holds the real current file, changed.gbr (crc 100), plus a stale
+// leftover copy nested inside backup.zip (crc 200) that happens to equal
+// B's current content. Step 3 pairs A's stale copy with B by content
+// alone, both go green; A's real current file is left with no B-side
+// leftover to pair with by name (B's only class was already consumed), so
+// it surfaces as an orphan red rather than a yellow pair. This is intended
+// - not a regression to fix - so a future refactor of the matching
+// ordering doesn't accidentally re-introduce path-based "real change
+// always wins" behaviour without a deliberate decision to do so.
+void TestArchiveComparator::staleInArchiveDuplicateStealsContentMatch()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {make("changed.gbr", 100, 10), make("backup.zip/changed.gbr", 200, 10)};
+    const QVector<ArchiveReader::RawFileEntry> b = {make("changed.gbr", 200, 10)};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification),
+             static_cast<int>(EntryClassification::OnlyInThisArchive));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(result.differingPairs.size(), 0);
 }
 
 QTEST_MAIN(TestArchiveComparator)
