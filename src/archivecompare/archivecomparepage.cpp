@@ -223,12 +223,18 @@ void ArchiveComparePage::runComparison()
 {
     // Cleared unconditionally, before either early return below: a re-pick
     // that turns out empty or unreadable must not leave a previous pair's
-    // stale overlay/layers, or a previous run's compare time, on screen
-    // describing an archive selection that's since changed.
+    // stale overlay/layers, render/compare times, or classification trees on
+    // screen describing an archive selection that's since changed. The trees
+    // in particular are a claim about a comparison - green means "identical in
+    // both archives" - so stale coloured rows after a failed re-pick would
+    // assert something now false. A successful comparison repopulates them
+    // below, so the only visible effect is on the failure paths.
     shownLayerA_ = Layer{};
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
     compareTimeLabel_->setText(tr("Compare time: -"));
+    panelA_->showEntries({});
+    panelB_->showEntries({});
 
     const QString pathA = panelA_->archivePath();
     const QString pathB = panelB_->archivePath();
