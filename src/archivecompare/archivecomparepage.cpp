@@ -5,7 +5,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -16,15 +15,16 @@
 #include "../gerber/gerberparser.h"
 #include "../gerber/layermaskrenderer.h"
 #include "../gerber/maskcompositor.h"
+#include "archivecomparison.h"
 #include "archivepanel.h"
 #include "archivereader.h"
-#include "crccomparator.h"
 #include "gerberdifftrigger.h"
 
 namespace {
 
-// New (A) in green, old (B) in red - MaskCompositor's additive overlap
-// (CompositionMode_Plus) turns unchanged copper yellow, matching
+// A in green, B in red - A and B are symmetric slots (either archive can be
+// loaded on either side), not "new"/"old". MaskCompositor's additive
+// overlap (CompositionMode_Plus) turns unchanged copper yellow, matching
 // CAMMaster's compare view (M4 design doc, section 2). Fixed for M4; a
 // color picker is an explicit non-goal until the overlay is in daily use.
 const QColor kColorA(60, 220, 60);
@@ -61,14 +61,26 @@ QWidget *makeColorLegendRow(const QColor &color, const QString &description)
 }
 
 // One list row's label: the A-side path, plus " <-> B-path" only when the
-// two sides differ (a filename-fallback match can pair files at different
-// paths - see the path-tolerant-matching design doc).
+// two sides differ (content-first matching's name/extension passes can pair
+// files at different paths - see the content-first-archive-matching design
+// doc), followed by the pair's reason. Every row gets a reason suffix, even
+// a same-path pair: content-first matching never treats "same path" as
+// proof, only as one more assumption the user must be able to see (Q1).
 QString formatPairLabel(const DifferingPair &pair)
 {
-    if (pair.relativePathA == pair.relativePathB) {
-        return pair.relativePathA;
+    QString label = (pair.relativePathA == pair.relativePathB)
+        ? pair.relativePathA
+        : QObject::tr("%1  <->  %2").arg(pair.relativePathA, pair.relativePathB);
+    switch (pair.reason) {
+    case PairReason::SameName:
+        label += QObject::tr(" - same name");
+        break;
+    case PairReason::OnlyExtensionCandidate:
+        label += QObject::tr(" - only .%1 left on each side")
+                      .arg(QFileInfo(pair.relativePathA).suffix().toLower());
+        break;
     }
-    return QObject::tr("%1  <->  %2").arg(pair.relativePathA, pair.relativePathB);
+    return label;
 }
 
 // Distinct lowercase file extensions among unrecognized pairs' paths (both
@@ -106,9 +118,11 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *contentRow = new QHBoxLayout;
     contentRow->setSpacing(12);
 
-    panelA_ = new ArchivePanel(tr("New"));
+    // A and B are symmetric slots - either archive may be loaded on either
+    // side, so the labels name the slot, not an implied direction.
+    panelA_ = new ArchivePanel(tr("A"));
     panelA_->setFixedWidth(252); // +20% over the original 210px
-    panelB_ = new ArchivePanel(tr("Old"));
+    panelB_ = new ArchivePanel(tr("B"));
     panelB_->setFixedWidth(252);
     contentRow->addWidget(panelA_);
     contentRow->addWidget(panelB_);
@@ -163,7 +177,10 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     canvasCardLayout->addWidget(gerberCanvas_);
 
     // Detail card: the static overlay color legend, one color per line,
-    // with the render time right-aligned on the first line.
+    // with the render time right-aligned on the first line and the compare
+    // time right-aligned on the second (Q7: timing compare and render
+    // separately means a future slowdown can be attributed to the right
+    // half instead of guessed at).
     auto *detailCard = new QWidget;
     detailCard->setObjectName("detailCard");
     detailCard->setAttribute(Qt::WA_StyledBackground, true);
@@ -173,12 +190,19 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
     renderTimeLabel_->setObjectName("detailLabel");
     auto *firstLine = new QHBoxLayout;
-    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only new")));
+    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only in A")));
     firstLine->addStretch();
     firstLine->addWidget(renderTimeLabel_);
 
+    compareTimeLabel_ = new QLabel(tr("Compare time: -"));
+    compareTimeLabel_->setObjectName("detailLabel");
+    auto *secondLine = new QHBoxLayout;
+    secondLine->addWidget(makeColorLegendRow(kColorB, tr("only in B")));
+    secondLine->addStretch();
+    secondLine->addWidget(compareTimeLabel_);
+
     detailCardLayout->addLayout(firstLine);
-    detailCardLayout->addWidget(makeColorLegendRow(kColorB, tr("only old")));
+    detailCardLayout->addLayout(secondLine);
     detailCardLayout->addWidget(makeColorLegendRow(kColorOverlap, tr("same")));
 
     rightColumn->addWidget(pairsCard);
@@ -199,11 +223,12 @@ void ArchiveComparePage::runComparison()
 {
     // Cleared unconditionally, before either early return below: a re-pick
     // that turns out empty or unreadable must not leave a previous pair's
-    // stale overlay/layers on screen describing an archive selection that's
-    // since changed.
+    // stale overlay/layers, or a previous run's compare time, on screen
+    // describing an archive selection that's since changed.
     shownLayerA_ = Layer{};
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
+    compareTimeLabel_->setText(tr("Compare time: -"));
 
     const QString pathA = panelA_->archivePath();
     const QString pathB = panelB_->archivePath();
@@ -211,44 +236,36 @@ void ArchiveComparePage::runComparison()
         return; // wait until both archives are picked
     }
 
-    // Each archive is read independently so a failure on one side (FR-008:
-    // corrupt, password-protected, or otherwise unreadable) is reported for
-    // that archive specifically, without crashing and without blocking a
-    // perfectly fine archive on the other side.
-    QVector<ArchiveReader::RawFileEntry> entriesA;
-    bool readA = true;
-    try {
-        // TEMPORARY (Task 6 of 8): readTopLevel only lists each archive's
-        // top level - nested archives are not expanded at all yet, so a
-        // changed file inside one won't show. The orchestrator that walks
-        // readTopLevel + expandNested together to restore full recursive
-        // comparison lands in Task 8; this is an expected, sanctioned
-        // regression for this task, not a bug.
-        entriesA = ArchiveReader::readTopLevel(pathA);
-    } catch (const ArchiveOpenError &error) {
-        readA = false;
-        QMessageBox::warning(this, tr("Archive A could not be opened"), error.message());
-    }
+    // The whole read-expand-compare pipeline in one call (Q4/Q7). Errors
+    // come back as data, not exceptions: each panel shows its own failure
+    // inline via showError() instead of a modal dialog that would force the
+    // user to dismiss it before seeing which side failed and how the other
+    // side fared.
+    const ArchiveComparison::Outcome outcome = ArchiveComparison::compareArchives(pathA, pathB);
 
-    QVector<ArchiveReader::RawFileEntry> entriesB;
-    bool readB = true;
-    try {
-        // TEMPORARY (Task 6 of 8): see the matching comment on entriesA above.
-        entriesB = ArchiveReader::readTopLevel(pathB);
-    } catch (const ArchiveOpenError &error) {
-        readB = false;
-        QMessageBox::warning(this, tr("Archive B could not be opened"), error.message());
+    if (!outcome.errorA.isEmpty()) {
+        panelA_->showError(outcome.errorA);
+    } else {
+        panelA_->clearError();
     }
-
-    if (!readA || !readB) {
+    if (!outcome.errorB.isEmpty()) {
+        panelB_->showError(outcome.errorB);
+    } else {
+        panelB_->clearError();
+    }
+    if (!outcome.errorA.isEmpty() || !outcome.errorB.isEmpty()) {
         return; // can't produce a meaningful comparison with one side unreadable
     }
 
-    const ArchiveComparisonResult result = CrcComparator::compare(entriesA, entriesB);
-    panelA_->showEntries(result.entriesA);
-    panelB_->showEntries(result.entriesB);
+    panelA_->showEntries(outcome.result.entriesA);
+    panelB_->showEntries(outcome.result.entriesB);
+    // The pipeline just ran to completion, so - unlike renderTimeLabel_
+    // below - this IS the value to show, not a placeholder: rendering only
+    // happens once the user selects a pair, but the compare itself is
+    // already done.
+    compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs));
 
-    eligiblePairs_ = GerberDiffTrigger::eligiblePairs(result.differingPairs);
+    eligiblePairs_ = GerberDiffTrigger::eligiblePairs(outcome.result.differingPairs);
     gerberPairList_->clear();
     for (const auto &pair : eligiblePairs_) {
         gerberPairList_->addItem(formatPairLabel(pair));
@@ -260,8 +277,8 @@ void ArchiveComparePage::runComparison()
     // the Detail card until the user clicks a new pair.
     renderTimeLabel_->setText(tr("Render time: -"));
 
-    const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
-    const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
+    const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(outcome.result.differingPairs);
+    const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(outcome.result.differingPairs);
     rebuildSkippedPairsUi(unrecognized, drill);
 }
 
@@ -384,15 +401,15 @@ void ArchiveComparePage::showSelectedPair()
     } else if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
         pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2.").arg(parseErrorA, parseErrorB));
     } else if (!parseErrorA.isEmpty()) {
-        pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing old file only.").arg(parseErrorA));
+        pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing B only.").arg(parseErrorA));
     } else if (!parseErrorB.isEmpty()) {
-        pairStatusLabel_->setText(tr("B side failed to parse: %1 - showing new file only.").arg(parseErrorB));
+        pairStatusLabel_->setText(tr("B side failed to parse: %1 - showing A only.").arg(parseErrorB));
     } else if (unitedBounds.isEmpty()) {
         pairStatusLabel_->setText(tr("Neither side has drawable content."));
     } else if (boundsA.isEmpty()) {
-        pairStatusLabel_->setText(tr("A side: no drawable content - showing old file only."));
+        pairStatusLabel_->setText(tr("A side: no drawable content - showing B only."));
     } else if (boundsB.isEmpty()) {
-        pairStatusLabel_->setText(tr("B side: no drawable content - showing new file only."));
+        pairStatusLabel_->setText(tr("B side: no drawable content - showing A only."));
     } else {
         pairStatusLabel_->clear();
     }

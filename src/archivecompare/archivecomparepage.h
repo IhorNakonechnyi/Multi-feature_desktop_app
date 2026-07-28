@@ -18,8 +18,8 @@ class QWidget;
 // overlay-compare area in the page's right-hand column (M4, see
 // docs/superpowers/specs/2026-07-18-gerber-render-v2-m4-overlay-design.md):
 // every changed Gerber pair between the two archives is listed; selecting
-// one renders both revisions in one CompositeView, additively tinted (new =
-// green, old = red, unchanged = yellow overlap) - the CAMMaster-style
+// one renders both revisions in one CompositeView, additively tinted (A =
+// green, B = red, unchanged = yellow overlap) - the CAMMaster-style
 // compare the whole v2 rendering rewrite was built toward.
 class ArchiveComparePage : public QWidget {
     Q_OBJECT
@@ -43,6 +43,7 @@ private:
     QWidget *skippedUnrecognizedButtonRow_;
     QLabel *skippedDrillLabel_;
     QLabel *renderTimeLabel_;
+    QLabel *compareTimeLabel_;
     CompositeView *gerberCanvas_;
 
     // The pairs behind gerberPairList_'s rows, same order/index.

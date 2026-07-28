@@ -41,6 +41,14 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
     headerLayout->addWidget(fileNameLabel_, 1);
     headerLayout->addWidget(changeButton_);
 
+    // Hidden until showError() sets it - inline replacement for the modal
+    // warning dialog this panel used to be notified via (Q7: errors are
+    // data, only display code shows anything).
+    errorLabel_ = new QLabel;
+    errorLabel_->setObjectName("detailLabel");
+    errorLabel_->setWordWrap(true);
+    errorLabel_->setVisible(false);
+
     treeView_ = new QTreeView;
     treeView_->setHeaderHidden(true);
     // Without this, the single column stretches to fill the viewport and a
@@ -55,6 +63,7 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
     treeView_->setItemDelegate(new ArchiveTreeDelegate(treeView_));
 
     layout->addWidget(header);
+    layout->addWidget(errorLabel_);
     layout->addWidget(treeView_, 1);
 
     connect(changeButton_, &QPushButton::clicked, this, &ArchivePanel::pickArchive);
@@ -84,6 +93,21 @@ void ArchivePanel::showEntries(const QVector<ArchiveEntry> &entries)
     // Column must be re-sized to the new content every time - a fresh
     // archive's names are a different width than the last one's.
     treeView_->resizeColumnToContents(0);
+}
+
+void ArchivePanel::showError(const QString &message)
+{
+    errorLabel_->setText(message);
+    errorLabel_->setVisible(true);
+    // An error means this archive produced no usable entries this run - a
+    // tree left over from the last successful read would sit there looking
+    // current while actually describing a stale selection.
+    model_->buildFrom({});
+}
+
+void ArchivePanel::clearError()
+{
+    errorLabel_->setVisible(false);
 }
 
 void ArchivePanel::dragEnterEvent(QDragEnterEvent *event)

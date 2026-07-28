@@ -23,6 +23,13 @@ public:
     // Rebuilds the visible tree from a freshly classified entry list.
     void showEntries(const QVector<ArchiveEntry> &entries);
 
+    // Inline failure display (Q7: errors are data, only the page/panel
+    // shows anything - never a modal dialog). Also clears the tree, since a
+    // stale tree next to a fresh error message would misleadingly suggest
+    // the error is about something else.
+    void showError(const QString &message);
+    void clearError();
+
 signals:
     // Emitted whenever the user picks or drops a new archive - the page
     // re-runs the comparison once both panels have a path set.
@@ -40,6 +47,7 @@ private:
     QString archivePath_;
     QLabel *fileNameLabel_;
     QPushButton *changeButton_;
+    QLabel *errorLabel_;
     QTreeView *treeView_;
     ArchiveTreeModel *model_;
 };
