@@ -180,8 +180,9 @@ Q1 should therefore decide the matching strategy, not just the dedup predicate.
 **Decision:** matching becomes **content-first**. Full design in
 `docs/superpowers/specs/2026-07-27-content-first-archive-matching-design.md`.
 Summary: group by `(crc32, size)` into classes → collapse duplicates within an
-archive (representative = shallowest path; other copies green + `duplicate`
-badge) → content match → name pass over leftovers with cross-product pairs →
+archive (representative = shallowest path; other copies plain green — originally
+a `duplicate` badge, removed by Q9) → content match → name pass over leftovers
+with cross-product pairs →
 extension pass, one class per side only → red. `selfDuplicateIndices()` deleted.
 Colours redefined: green = nothing to do, yellow = app *assumes* these
 correspond and they differ, red = no counterpart, check it yourself. A/B are
@@ -225,15 +226,18 @@ drill/Gerber" message there instead?
   extension-based drill test always agrees for both. That skipped-pairs message
   has never been shown and cannot be.
 
-**Decision:** **drawability is decided by content**, with the extension list
-demoted to a fallback for inconclusive files. Classification reads only the first
-~40 lines, and only of files appearing in a differing pair, so the archive-wide
-comparison stays central-directory-only. The mixed drill/Gerber special case is
-deleted — a drill file is a Gerber-family file that needs a different parser and
-is otherwise treated identically; the app polices layer semantics nowhere else.
-Full design in
+**Decision:** **drawability is decided by content**, and only of files appearing
+in a differing pair, so the archive-wide comparison stays central-directory-only.
+The mixed drill/Gerber special case is deleted — a drill file is a Gerber-family
+file that needs a different parser and is otherwise treated identically; the app
+polices layer semantics nowhere else. Full design in
 `docs/superpowers/specs/2026-07-27-content-based-drawability-design.md`.
-**Substantially defuses Q12.**
+
+*As decided here* the extension list survived as a fallback for inconclusive
+files, with a ~40-line sniff window. **Q12 then went further**: the extension
+mechanism is deleted outright (a file with no `%FS`/`%MO`/`M48` cannot be parsed
+whatever its extension says) and the sniff window widens to 8 KB to compensate.
+The spec is amended accordingly — read it, not this paragraph, as authoritative.
 
 ---
 
@@ -280,7 +284,8 @@ rather than dropping it. Also distinguish "entry unreadable" from "entry is
 empty" so the UI stops reporting a read failure as "no drawable content".
 
 Implementation plan drafted at
-`C:\Users\igor0\.claude\plans\we-need-to-handle-hazy-hennessy.md`; it also lands
+`docs/superpowers/plans/2026-07-27-archivereader-content-based-nesting.md`
+(moved into the repo 2026-07-28 from a user-global scratch path); it also lands
 the shared path-resolution walk and the `readEntryHead()` helper **Q2** needs, so
 Q2 does not duplicate the same logic in the same file. Not executed — all
 questions get decided before any implementation.
@@ -357,7 +362,9 @@ collisions are practically negligible here, but the extra check is free.
 **Question:** add size as a second equality condition (cheap, strictly safer),
 or leave CRC-only and treat this as a non-issue?
 
-**Decision:** _pending_
+**Decision:** none needed — dissolved by Q1 (see Status above). Size became half
+of file identity, which is strictly stronger than the "second equality condition"
+this question asked for.
 
 ---
 
@@ -378,7 +385,8 @@ yellow in the tree with no way to preview them.
 **Question:** acceptable, or should every copy be listed (risking an N×M pair
 list)? Related to Q1 — a tightened duplicate rule changes how often this fires.
 
-**Decision:** _pending_
+**Decision:** none needed — dissolved by Q1 (see Status above). The cross product
+answers "every variant reachable"; duplicate collapse answers the N×M worry.
 
 ---
 
@@ -403,6 +411,8 @@ original question didn't account for: decompressing the first ~40 lines of every
 file in a differing pair, on the GUI thread, before the pair list can be drawn.
 Small per file, but it is now work that happens between "user picks archives" and
 "user sees results", where previously nothing was decompressed at that point.
+(Q12 later widened that read to 8 KB per file — still far below anything the
+thresholds below would notice, so this decision is unaffected.)
 
 ### Findings (2026-07-27)
 
@@ -780,9 +790,9 @@ a heavily revised archive the user scrolls a tiny box.
 actually see, or should the card grow (up to a cap) with the pair count?
 
 **Impact of Q1/Q2 — this got more pressing, and each row got wider.** Three
-(note: point 2 below is superseded — Q9 removed the duplicate badge, but the pair
-list still carries the pair *reason*, which is what widens the row.)
-changes push against the 90px cap:
+changes push against the 90px cap (point 2 survives Q9: the badge Q9 removed was
+a *tree-row* marker for duplicates; the pair *reason* on pair-list rows is a
+different element and stays):
 
 1. Q1's name pass emits the full A-class × B-class cross product, so one filename
    with two distinct variants on one side now produces two rows where it produced
