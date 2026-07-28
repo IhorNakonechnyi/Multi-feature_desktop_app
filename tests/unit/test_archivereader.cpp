@@ -399,12 +399,13 @@ void TestArchiveReader::expandNestedListsContents()
     QVERIFY(dir.isValid());
     const QString archivePath = dir.filePath("top.zip");
 
+    const QByteArray aGtlContent = "G04 inside real nested zip*\n";
     QByteArray nestedZipBytes;
     QBuffer nestedBuffer(&nestedZipBytes);
     QVERIFY(nestedBuffer.open(QIODevice::WriteOnly));
     QuaZip nestedZip(&nestedBuffer);
     QVERIFY(nestedZip.open(QuaZip::mdCreate));
-    addEntry(nestedZip, "a.gtl", "G04 inside real nested zip*\n");
+    addEntry(nestedZip, "a.gtl", aGtlContent);
     nestedZip.close();
     nestedBuffer.close();
 
@@ -417,6 +418,12 @@ void TestArchiveReader::expandNestedListsContents()
     QVERIFY(expansion.openedAsArchive);
     QCOMPARE(expansion.entries.size(), 1);
     QCOMPARE(expansion.entries.first().relativePath, QString("inner.zip/a.gtl"));
+    // The comparator matches files on (crc32, size) - a zeroed or wrong
+    // value here would silently corrupt every match downstream, so check
+    // both directly rather than relying on topLevelListsNestedAsOpaque's
+    // coverage of the same readOneLevel code path by inference.
+    QVERIFY(expansion.entries.first().crc32 != 0);
+    QCOMPARE(expansion.entries.first().sizeBytes, quint64(aGtlContent.size()));
 }
 
 void TestArchiveReader::expandNestedRejectsNonZip()
@@ -425,10 +432,35 @@ void TestArchiveReader::expandNestedRejectsNonZip()
     QVERIFY(dir.isValid());
     const QString archivePath = dir.filePath("top.zip");
 
+    // A genuine nested zip alongside the misnamed candidate, in the SAME
+    // archive. Without this positive control, this test would assert
+    // !openedAsArchive && entries.isEmpty() - exactly the default-
+    // constructed state of NestedExpansion{}, which a completely no-op
+    // expandNested (e.g. `return {};`, the very stub Step 2 of the task
+    // brief calls for before the real implementation exists) would satisfy
+    // identically to a correct one. Asserting the positive case first on
+    // the same archive means this test can only pass if expandNested
+    // actually distinguishes "tried to open the bytes and they weren't a
+    // zip" from "did nothing" - do not remove this half of the test.
+    QByteArray nestedZipBytes;
+    QBuffer nestedBuffer(&nestedZipBytes);
+    QVERIFY(nestedBuffer.open(QIODevice::WriteOnly));
+    QuaZip nestedZip(&nestedBuffer);
+    QVERIFY(nestedZip.open(QuaZip::mdCreate));
+    addEntry(nestedZip, "a.gtl", "G04 inside real nested zip*\n");
+    nestedZip.close();
+    nestedBuffer.close();
+
     QuaZip zip(archivePath);
     QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "inner.zip", nestedZipBytes);
     addEntry(zip, "notes.zip", "not a zip");
     zip.close();
+
+    const ArchiveReader::NestedExpansion positiveControl = ArchiveReader::expandNested(archivePath, "inner.zip");
+    QVERIFY(positiveControl.openedAsArchive);
+    QCOMPARE(positiveControl.entries.size(), 1);
+    QCOMPARE(positiveControl.entries.first().relativePath, QString("inner.zip/a.gtl"));
 
     const ArchiveReader::NestedExpansion expansion = ArchiveReader::expandNested(archivePath, "notes.zip");
     QVERIFY(!expansion.openedAsArchive);
@@ -471,6 +503,11 @@ void TestArchiveReader::expandNestedGrandchildCandidate()
     QCOMPARE(expansion.entries.size(), 1);
     QCOMPARE(expansion.entries.first().relativePath, QString("inner.zip/deep.zip"));
     QVERIFY(expansion.entries.first().isNestedArchiveCandidate);
+    // Same fidelity concern as expandNestedListsContents: the comparator
+    // matches on (crc32, size), so check deep.zip's own central-directory
+    // values directly rather than relying on inference from another test.
+    QVERIFY(expansion.entries.first().crc32 != 0);
+    QCOMPARE(expansion.entries.first().sizeBytes, quint64(deepZipBytes.size()));
 }
 
 void TestArchiveReader::expandNestedInsideExpanded()
