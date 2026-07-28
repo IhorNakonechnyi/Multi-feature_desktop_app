@@ -85,6 +85,8 @@ add_executable(PcbSupplierWorkflow
     src/archivecompare/archivereader.cpp
     src/archivecompare/crccomparator.h
     src/archivecompare/crccomparator.cpp
+    src/archivecompare/archivecomparison.h
+    src/archivecompare/archivecomparison.cpp
     src/archivecompare/archivetreemodel.h
     src/archivecompare/archivetreemodel.cpp
     src/archivecompare/archivetreedelegate.h

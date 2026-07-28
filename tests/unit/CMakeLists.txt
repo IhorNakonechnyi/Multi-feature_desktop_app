@@ -17,6 +17,16 @@ target_include_directories(test_archivereader PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivereader PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
 add_test(NAME test_archivereader COMMAND test_archivereader)
 
+add_executable(test_archivecomparison
+    test_archivecomparison.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivecomparison.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/crccomparator.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivereader.cpp
+)
+target_include_directories(test_archivecomparison PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivecomparison PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
+add_test(NAME test_archivecomparison COMMAND test_archivecomparison)
+
 add_executable(test_archivetreemodel
     test_archivetreemodel.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/archivetreemodel.cpp
