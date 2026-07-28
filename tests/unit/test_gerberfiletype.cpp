@@ -4,7 +4,6 @@
 
 using GerberFileType::classify;
 using GerberFileType::Drawability;
-using GerberFileType::kClassifySniffBytes;
 
 // classify() is content-only (Q2/Q12): the filename plays no part, and
 // there is no extension fallback to rescue an inconclusive file. Every
@@ -40,9 +39,9 @@ void TestGerberFileType::gerberDetectedByFormatSpec()
     QCOMPARE(classify(head), Drawability::Gerber);
 }
 
-// %MO (units mode) alone is enough to call a file Gerber, even when the
-// %FS this head happens to also carry isn't the trigger - a stub that only
-// recognized "%FS" literally would fail this one.
+// %MO (units mode) alone is enough to call a file Gerber - this head
+// carries no %FS at all, only %MO, so a stub that only recognized "%FS"
+// literally would fail this one.
 void TestGerberFileType::gerberDetectedByModeOnly()
 {
     const QByteArray head = "%MOIN*%\nG04 header banner*\nX010Y010D02*\n";
@@ -89,10 +88,16 @@ void TestGerberFileType::fsBehindLongCommentBannerFound()
 // The mirror image of fsBehindLongCommentBannerFound: %FS pushed past the
 // 8 KB window is a documented limit, not a bug - asserted here so a future
 // change to kClassifySniffBytes is a deliberate, test-visible decision.
-// classify() only ever receives up to kClassifySniffBytes bytes in
-// production (ArchiveReader's head-read helper caps it there), so this
-// test caps the head itself the same way rather than relying on classify()
-// to do its own truncation.
+// Deliberately passes the full, UNtruncated >9 KB buffer to classify() -
+// callers in production (ArchiveComparePage::parseGerberOrDrill,
+// GerberViewerPage::openFile) hand classify() whole-file bytes today (the
+// head-only ArchiveReader helper isn't wired in until a later task), so
+// classify() must do its own truncation. Pre-truncating the buffer here
+// (as an earlier version of this test did) would test nothing: the cap
+// would never see an oversized argument from any test in this file, so it
+// could be deleted from classify() with zero test regression - this
+// version was confirmed to genuinely fail without the cap (see task-9
+// report's fix addendum for the deliberate-failure run).
 void TestGerberFileType::fsBeyond8KbNotFound()
 {
     QByteArray full;
@@ -101,8 +106,7 @@ void TestGerberFileType::fsBeyond8KbNotFound()
         full += bannerLine;
     }
     full += "%FSLAX35Y35*%\n";
-    const QByteArray head = full.left(static_cast<int>(kClassifySniffBytes));
-    QCOMPARE(classify(head), Drawability::NotDrawable);
+    QCOMPARE(classify(full), Drawability::NotDrawable);
 }
 
 // "M48" must match only as a whole trimmed line, not as a substring buried
