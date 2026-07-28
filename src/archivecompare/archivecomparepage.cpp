@@ -5,7 +5,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
-#include <QPushButton>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -81,24 +80,6 @@ QString formatPairLabel(const DifferingPair &pair)
         break;
     }
     return label;
-}
-
-// Distinct lowercase file extensions among unrecognized pairs' paths (both
-// sides) - what the "Add extension" buttons are built from.
-// QFileInfo::suffix() matches the extraction GerberFileType::isRecognized
-// itself uses.
-QStringList distinctUnrecognizedExtensions(const QVector<DifferingPair> &unrecognizedPairs)
-{
-    QStringList extensions;
-    for (const auto &pair : unrecognizedPairs) {
-        for (const QString &path : {pair.relativePathA, pair.relativePathB}) {
-            const QString extension = QFileInfo(path).suffix().toLower();
-            if (!extension.isEmpty() && !GerberFileType::isRecognized(path) && !extensions.contains(extension)) {
-                extensions.append(extension);
-            }
-        }
-    }
-    return extensions;
 }
 
 } // namespace
@@ -300,27 +281,24 @@ void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unr
         delete item;
     }
 
+    // The "Add .<ext>" button row is gone: GerberFileType::addUserExtension
+    // was deleted along with the rest of the extension mechanism (Q12) - it
+    // could no longer do anything useful, since a file the sniff can't find
+    // %FS/%MO/M48 in has no coordinate format to parse regardless of what
+    // extension is forced onto it. skippedUnrecognizedButtonRow_ therefore
+    // stays permanently empty and hidden; only its label - the user's
+    // signal that something was dropped - still appears. Bucketing this
+    // list by content instead of by extension is Task 10's job (content-
+    // based-drawability design doc); until then this stays wired to
+    // GerberDiffTrigger::unrecognizedPairs' existing (extension-based)
+    // output.
+    skippedUnrecognizedButtonRow_->setVisible(false);
     if (unrecognized.isEmpty()) {
         skippedUnrecognizedLabel_->setVisible(false);
-        skippedUnrecognizedButtonRow_->setVisible(false);
     } else {
-        // Visibility is driven by `unrecognized`, not the derived
-        // extension list: a skipped pair with no extension on either side
-        // (or one already covered by a just-added extension) yields no
-        // button, but is still genuinely skipped and must not make the
-        // label - the user's only signal something was dropped - disappear.
         skippedUnrecognizedLabel_->setText(
-            tr("%1 changed pair(s) skipped - unrecognized file extension:").arg(unrecognized.size()));
+            tr("%1 changed pair(s) skipped - unrecognized file extension.").arg(unrecognized.size()));
         skippedUnrecognizedLabel_->setVisible(true);
-        for (const QString &extension : distinctUnrecognizedExtensions(unrecognized)) {
-            auto *addButton = new QPushButton(tr("Add .%1").arg(extension));
-            connect(addButton, &QPushButton::clicked, this, [this, extension]() {
-                GerberFileType::addUserExtension(extension);
-                runComparison();
-            });
-            skippedUnrecognizedButtonRow_->layout()->addWidget(addButton);
-        }
-        skippedUnrecognizedButtonRow_->setVisible(true);
     }
 
     if (drill.isEmpty()) {
@@ -336,22 +314,27 @@ void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unr
     }
 }
 
-// Picks GerberParser or ExcellonParser by the entry's own file extension
-// (GerberFileType::isDrillFile) - see the M5 design doc, section 2. An
-// empty `bytes` (read failure, already handled independently per side by
-// the caller) produces an empty Layer with no error. An ExcellonParser
-// ambiguous-coordinate-format failure is caught here and reported via
-// `parseError` instead of propagating, mirroring how a read failure is
-// already just an empty Layer rather than a thrown exception at this
-// layer - one file's problem must never abort rendering the other side.
-Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, const QString &relativePath,
-                                              QString &parseError)
+// Picks GerberParser or ExcellonParser by the entry's own content
+// (GerberFileType::classify) - content-only, no filename involved (Q2/Q12;
+// docs/superpowers/specs/2026-07-27-content-based-drawability-design.md).
+// An empty `bytes` (read failure, already handled independently per side by
+// the caller) produces an empty Layer with no error. A NotDrawable
+// classification also falls through to GerberParser, same as before this
+// change - that parser then finds nothing to draw and layerBoundsMm reports
+// empty bounds, which showSelectedPair already turns into a "no drawable
+// content" status; there is no separate NotDrawable path to wire up here.
+// An ExcellonParser ambiguous-coordinate-format failure is caught here and
+// reported via `parseError` instead of propagating, mirroring how a read
+// failure is already just an empty Layer rather than a thrown exception at
+// this layer - one file's problem must never abort rendering the other
+// side.
+Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, QString &parseError)
 {
     if (bytes.isEmpty()) {
         return Layer{};
     }
     const QString content = QString::fromUtf8(bytes);
-    if (!GerberFileType::isDrillFile(relativePath, bytes)) {
+    if (GerberFileType::classify(bytes) != GerberFileType::Drawability::ExcellonDrill) {
         return GerberParser::parseContentToObjects(content);
     }
     try {
@@ -377,8 +360,8 @@ void ArchiveComparePage::showSelectedPair()
 
     QString parseErrorA;
     QString parseErrorB;
-    shownLayerA_ = parseGerberOrDrill(bytesA, pair.relativePathA, parseErrorA);
-    shownLayerB_ = parseGerberOrDrill(bytesB, pair.relativePathB, parseErrorB);
+    shownLayerA_ = parseGerberOrDrill(bytesA, parseErrorA);
+    shownLayerB_ = parseGerberOrDrill(bytesB, parseErrorB);
 
     // Each side is judged independently: an empty-but-readable file, a read
     // failure, or a parse failure (parseErrorX set) all leave that side's

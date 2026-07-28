@@ -1,106 +1,117 @@
-#include <QSettings>
-#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include "gerber/gerberfiletype.h"
 
-// GerberFileType persists user extensions via real QSettings
-// (QSettings::IniFormat, QSettings::UserScope, "PcbSupplierWorkflow",
-// "PcbSupplierWorkflow") - redirect QSettings' default storage path to a
-// fresh temp location for this test binary's process lifetime so these
-// tests never read or write the real developer/user settings file, and
-// never see state left over from a previous test run. This must happen
-// before any GerberFileType call and stays in effect for the whole
-// binary (QSettings::setPath is a global, process-wide default).
+using GerberFileType::classify;
+using GerberFileType::Drawability;
+using GerberFileType::kClassifySniffBytes;
+
+// classify() is content-only (Q2/Q12): the filename plays no part, and
+// there is no extension fallback to rescue an inconclusive file. Every
+// case here is named for the file's actual bytes, not any extension it
+// might carry in a real archive - several deliberately note an extension
+// in the comment that would have misled the old extension-based mechanism.
 class TestGerberFileType : public QObject {
     Q_OBJECT
 
 private slots:
-    void initTestCase();
-
-    void recognizesBuiltInExtensionCaseInsensitively();
-    void unknownExtensionIsNotRecognized();
-    void addUserExtensionMakesItRecognized();
-    void emptyExtensionIsNotRecognized();
-    void drillExtensionsAreRecognizedAsDrillFiles();
-    void gerberExtensionIsNotADrillFile();
-    void emptyExtensionIsNotADrillFile();
-    void txtExtensionWithM48HeaderIsADrillFile();
-    void txtExtensionWithoutM48HeaderIsNotADrillFile();
-    void drlExtensionIsADrillFileEvenWithUnrelatedContent();
-
-private:
-    QTemporaryDir settingsDir_;
+    void excellonDetectedWhateverTheName();
+    void gerberDetectedByFormatSpec();
+    void gerberDetectedByModeOnly();
+    void gtlNamedTextIsNotDrawable();
+    void excellonWinsOverGerberMarkers();
+    void fsBehindLongCommentBannerFound();
+    void fsBeyond8KbNotFound();
+    void m48SubstringInsideLineIgnored();
 };
 
-void TestGerberFileType::initTestCase()
+// A genuine Excellon drill header - the real-world case this whole design
+// exists for is a supplier drill file saved with a .TXT extension, so this
+// must classify as ExcellonDrill purely from the bytes.
+void TestGerberFileType::excellonDetectedWhateverTheName()
 {
-    QVERIFY(settingsDir_.isValid());
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir_.path());
+    const QByteArray head = "M48\nINCH,LZ\nT01C0.030\n%\nT01\nX010Y010\nM30\n";
+    QCOMPARE(classify(head), Drawability::ExcellonDrill);
 }
 
-void TestGerberFileType::recognizesBuiltInExtensionCaseInsensitively()
+void TestGerberFileType::gerberDetectedByFormatSpec()
 {
-    QVERIFY(GerberFileType::isRecognized("layer.GTL"));
-    QVERIFY(GerberFileType::isRecognized("layer.gtl"));
+    const QByteArray head = "%FSLAX35Y35*%\nG04 layer header*\nX010Y010D02*\n";
+    QCOMPARE(classify(head), Drawability::Gerber);
 }
 
-void TestGerberFileType::unknownExtensionIsNotRecognized()
+// %MO (units mode) alone is enough to call a file Gerber, even when the
+// %FS this head happens to also carry isn't the trigger - a stub that only
+// recognized "%FS" literally would fail this one.
+void TestGerberFileType::gerberDetectedByModeOnly()
 {
-    QVERIFY(!GerberFileType::isRecognized("readme.docx"));
+    const QByteArray head = "%MOIN*%\nG04 header banner*\nX010Y010D02*\n";
+    QCOMPARE(classify(head), Drawability::Gerber);
 }
 
-void TestGerberFileType::addUserExtensionMakesItRecognized()
+// Plain text with no drill or Gerber markers at all - the extension no
+// longer rescues anything, so even a .gtl-named file with this content
+// must be NotDrawable (see gtlNamedTextIsNotDrawable's sibling positive
+// cases above and below: this file proves the negative side actually
+// discriminates, since a stub returning NotDrawable unconditionally would
+// also pass every other test on its own - this one confirms the *other*
+// cases aren't equally satisfied by that same stub).
+void TestGerberFileType::gtlNamedTextIsNotDrawable()
 {
-    QVERIFY(!GerberFileType::isRecognized("layer.foobar123"));
-    GerberFileType::addUserExtension("foobar123");
-    QVERIFY(GerberFileType::isRecognized("layer.foobar123"));
+    const QByteArray head = "just a plain report\nline 2\n";
+    QCOMPARE(classify(head), Drawability::NotDrawable);
 }
 
-void TestGerberFileType::emptyExtensionIsNotRecognized()
+// Excellon is checked before Gerber markers (design doc, "Classification"):
+// an Excellon file may legitimately contain a bare "%" line (the tool-list
+// terminator), so a head with both a bare "%" and "M48" must still resolve
+// to ExcellonDrill, not Gerber.
+void TestGerberFileType::excellonWinsOverGerberMarkers()
 {
-    QVERIFY(!GerberFileType::isRecognized("noextension"));
+    const QByteArray head = "M48\nINCH,LZ\nT01C0.030\n%\nT01\nX010Y010\nM30\n";
+    QCOMPARE(classify(head), Drawability::ExcellonDrill);
 }
 
-void TestGerberFileType::drillExtensionsAreRecognizedAsDrillFiles()
+// A long G04 comment banner pushing %FS well past where a naive fixed-line
+// scan would stop must still be found - this is what justifies scanning by
+// byte count (8 KB), not by a small fixed number of lines.
+void TestGerberFileType::fsBehindLongCommentBannerFound()
 {
-    QVERIFY(GerberFileType::isDrillFile("board.drl"));
-    QVERIFY(GerberFileType::isDrillFile("board.DRL"));
-    QVERIFY(GerberFileType::isDrillFile("board.xln"));
+    QByteArray head;
+    const QByteArray bannerLine = "G04 banner*\n";
+    while (head.size() < 6 * 1024) {
+        head += bannerLine;
+    }
+    head += "%FSLAX35Y35*%\n";
+    QCOMPARE(classify(head), Drawability::Gerber);
 }
 
-void TestGerberFileType::gerberExtensionIsNotADrillFile()
+// The mirror image of fsBehindLongCommentBannerFound: %FS pushed past the
+// 8 KB window is a documented limit, not a bug - asserted here so a future
+// change to kClassifySniffBytes is a deliberate, test-visible decision.
+// classify() only ever receives up to kClassifySniffBytes bytes in
+// production (ArchiveReader's head-read helper caps it there), so this
+// test caps the head itself the same way rather than relying on classify()
+// to do its own truncation.
+void TestGerberFileType::fsBeyond8KbNotFound()
 {
-    QVERIFY(!GerberFileType::isDrillFile("layer.gtl"));
+    QByteArray full;
+    const QByteArray bannerLine = "G04 banner*\n";
+    while (full.size() < 9 * 1024) {
+        full += bannerLine;
+    }
+    full += "%FSLAX35Y35*%\n";
+    const QByteArray head = full.left(static_cast<int>(kClassifySniffBytes));
+    QCOMPARE(classify(head), Drawability::NotDrawable);
 }
 
-void TestGerberFileType::emptyExtensionIsNotADrillFile()
+// "M48" must match only as a whole trimmed line, not as a substring buried
+// inside another line - a naive contains("M48") check would misclassify
+// this as ExcellonDrill instead of Gerber.
+void TestGerberFileType::m48SubstringInsideLineIgnored()
 {
-    QVERIFY(!GerberFileType::isDrillFile("noextension"));
-}
-
-// Real supplier files have shown up with genuine Excellon content under a
-// .txt extension (e.g. "347128-C_EX.TXT") - the extension-only overload
-// can't catch this, so the content-aware overload must sniff the M48
-// header instead of trusting the extension.
-void TestGerberFileType::txtExtensionWithM48HeaderIsADrillFile()
-{
-    const QByteArray content = "M48\nINCH,LZ\nT01C0.030\n%\nT01\nX010Y010\nM30\n";
-    QVERIFY(GerberFileType::isDrillFile("347128-C_EX.TXT", content));
-}
-
-void TestGerberFileType::txtExtensionWithoutM48HeaderIsNotADrillFile()
-{
-    const QByteArray content = "This is just a plain-text CAM tool report, not a drill file.\n";
-    QVERIFY(!GerberFileType::isDrillFile("readme.txt", content));
-}
-
-void TestGerberFileType::drlExtensionIsADrillFileEvenWithUnrelatedContent()
-{
-    // The .drl/.xln fast path must not require content sniffing at all -
-    // classification elsewhere (GerberDiffTrigger) runs before any bytes
-    // are read.
-    QVERIFY(GerberFileType::isDrillFile("board.drl", QByteArray()));
+    const QByteArray head = "G04 BOM48 note*\n%FSLAX24Y24*%\n";
+    QCOMPARE(classify(head), Drawability::Gerber);
 }
 
 QTEST_MAIN(TestGerberFileType)
