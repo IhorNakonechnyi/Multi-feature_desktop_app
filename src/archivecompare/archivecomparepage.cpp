@@ -218,7 +218,13 @@ void ArchiveComparePage::runComparison()
     QVector<ArchiveReader::RawFileEntry> entriesA;
     bool readA = true;
     try {
-        entriesA = ArchiveReader::readArchive(pathA);
+        // TEMPORARY (Task 6 of 8): readTopLevel only lists each archive's
+        // top level - nested archives are not expanded at all yet, so a
+        // changed file inside one won't show. The orchestrator that walks
+        // readTopLevel + expandNested together to restore full recursive
+        // comparison lands in Task 8; this is an expected, sanctioned
+        // regression for this task, not a bug.
+        entriesA = ArchiveReader::readTopLevel(pathA);
     } catch (const ArchiveOpenError &error) {
         readA = false;
         QMessageBox::warning(this, tr("Archive A could not be opened"), error.message());
@@ -227,7 +233,8 @@ void ArchiveComparePage::runComparison()
     QVector<ArchiveReader::RawFileEntry> entriesB;
     bool readB = true;
     try {
-        entriesB = ArchiveReader::readArchive(pathB);
+        // TEMPORARY (Task 6 of 8): see the matching comment on entriesA above.
+        entriesB = ArchiveReader::readTopLevel(pathB);
     } catch (const ArchiveOpenError &error) {
         readB = false;
         QMessageBox::warning(this, tr("Archive B could not be opened"), error.message());

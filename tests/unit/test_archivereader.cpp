@@ -1,5 +1,7 @@
 #include <QtTest/QtTest>
 
+#include <algorithm>
+
 #include <QBuffer>
 #include <QTemporaryDir>
 
@@ -86,21 +88,45 @@ private slots:
     // itself is empty, not a lookup failure).
     void zeroLengthEntrySetsFoundTrue();
 
-    // An entry named "notes.zip" whose actual content is plain text, not a
-    // zip. readEntriesFrom must not silently drop it just because the name
-    // matched the cheap ".zip" candidate filter - content decides, and a
-    // failed nested-open now falls back to listing the entry itself, with
-    // the crc32/sizeBytes already in hand from the central directory.
-    void misnamedZipFileIsListed();
+    // readTopLevel lists a real nested archive as a single opaque entry -
+    // its own contents ("a.gtl") must NOT appear in the top-level listing;
+    // only expandNested (below) reveals them.
+    void topLevelListsNestedAsOpaque();
 
-    // Same fixture as above: readEntryBytes must be able to read that
-    // entry's actual (non-zip) bytes back out, not just list it.
+    // A plain-text entry named "notes.zip": readTopLevel must list it with
+    // isNestedArchiveCandidate=true (name matched the cheap filter) even
+    // though its content isn't actually a zip - content isn't checked until
+    // expandNested is asked to open it.
+    void topLevelMarksMisnamedCandidate();
+
+    // expandNested on a genuine nested zip opens it and lists its top
+    // level, each entry prefixed with the container's own relativePath -
+    // this is the direct replacement for readArchive's old recursion.
+    void expandNestedListsContents();
+
+    // expandNested on a candidate whose bytes aren't actually a zip (the
+    // "notes.zip" fixture from topLevelMarksMisnamedCandidate) must report
+    // openedAsArchive=false rather than throwing or fabricating entries -
+    // content decides, not the name (Q3).
+    void expandNestedRejectsNonZip();
+
+    // A candidate one level inside a freshly-expanded container
+    // ("inner.zip" containing "deep.zip") must be listed as its own opaque
+    // entry, NOT recursed into automatically - expansion is always exactly
+    // one level per call.
+    void expandNestedGrandchildCandidate();
+
+    // expandNested(path, "inner.zip/deep.zip") must descend through BOTH
+    // levels in one call, reusing the same resolveStep-based walk
+    // readEntryBytes/readEntryHead use - containerRelativePath is not
+    // guaranteed to be a direct child of the top-level archive.
+    void expandNestedInsideExpanded();
+
+    // Unaffected by the readArchive -> readTopLevel/expandNested split:
+    // readEntryBytes must still be able to read a "*.zip"-named entry's
+    // actual (non-zip) bytes back out directly, by path, regardless of how
+    // it's listed.
     void misnamedZipFileIsReadable();
-
-    // Guardrail for the fallback above: a *genuine* nested zip must still
-    // flatten as before ("nested.zip/inner.gtl"), not get caught by the new
-    // fallback path.
-    void genuineNestedZipStillFlattens();
 
     // readEntryHead must return only the first maxBytes of a larger entry,
     // not the whole thing.
@@ -298,7 +324,54 @@ void TestArchiveReader::zeroLengthEntrySetsFoundTrue()
     QVERIFY(found);
 }
 
-void TestArchiveReader::misnamedZipFileIsListed()
+void TestArchiveReader::topLevelListsNestedAsOpaque()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString archivePath = dir.filePath("top.zip");
+
+    QByteArray nestedZipBytes;
+    QBuffer nestedBuffer(&nestedZipBytes);
+    QVERIFY(nestedBuffer.open(QIODevice::WriteOnly));
+    QuaZip nestedZip(&nestedBuffer);
+    QVERIFY(nestedZip.open(QuaZip::mdCreate));
+    addEntry(nestedZip, "a.gtl", "G04 inside real nested zip*\n");
+    nestedZip.close();
+    nestedBuffer.close();
+
+    QuaZip zip(archivePath);
+    QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "top.gtl", "G04 top level*\n");
+    addEntry(zip, "inner.zip", nestedZipBytes);
+    zip.close();
+
+    const QVector<ArchiveReader::RawFileEntry> entries = ArchiveReader::readTopLevel(archivePath);
+    QCOMPARE(entries.size(), 2);
+
+    const auto findByPath = [&entries](const QString &path) {
+        return std::find_if(entries.begin(), entries.end(),
+                             [&path](const ArchiveReader::RawFileEntry &e) { return e.relativePath == path; });
+    };
+
+    const auto topGtl = findByPath("top.gtl");
+    QVERIFY(topGtl != entries.end());
+    QVERIFY(!topGtl->isNestedArchiveCandidate);
+
+    const auto innerZip = findByPath("inner.zip");
+    QVERIFY(innerZip != entries.end());
+    QVERIFY(innerZip->isNestedArchiveCandidate);
+    // crc/size come straight from the central directory for inner.zip's own
+    // (compressed-as-one-entry) bytes - non-zero is enough to confirm
+    // they're populated, not left at the RawFileEntry default.
+    QVERIFY(innerZip->crc32 != 0);
+    QCOMPARE(innerZip->sizeBytes, quint64(nestedZipBytes.size()));
+
+    // The nested archive's own content must NOT appear - that's the whole
+    // point of phase 1 being opaque.
+    QVERIFY(findByPath("inner.zip/a.gtl") == entries.end());
+}
+
+void TestArchiveReader::topLevelMarksMisnamedCandidate()
 {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -310,15 +383,133 @@ void TestArchiveReader::misnamedZipFileIsListed()
     addEntry(zip, "notes.zip", content);
     zip.close();
 
-    const QVector<ArchiveReader::RawFileEntry> entries = ArchiveReader::readArchive(archivePath);
+    const QVector<ArchiveReader::RawFileEntry> entries = ArchiveReader::readTopLevel(archivePath);
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.first().relativePath, QString("notes.zip"));
     QCOMPARE(entries.first().sizeBytes, quint64(content.size()));
-    // crc32 isn't hand-computed here - it comes straight from the central
-    // directory QuaZip itself wrote, so the meaningful check is just that
-    // it's non-zero (i.e. actually populated from `info`, not left at the
-    // RawFileEntry default).
+    // The name alone is enough to mark it a candidate - content isn't
+    // examined until expandNested tries to open it (expandNestedRejectsNonZip).
+    QVERIFY(entries.first().isNestedArchiveCandidate);
     QVERIFY(entries.first().crc32 != 0);
+}
+
+void TestArchiveReader::expandNestedListsContents()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString archivePath = dir.filePath("top.zip");
+
+    QByteArray nestedZipBytes;
+    QBuffer nestedBuffer(&nestedZipBytes);
+    QVERIFY(nestedBuffer.open(QIODevice::WriteOnly));
+    QuaZip nestedZip(&nestedBuffer);
+    QVERIFY(nestedZip.open(QuaZip::mdCreate));
+    addEntry(nestedZip, "a.gtl", "G04 inside real nested zip*\n");
+    nestedZip.close();
+    nestedBuffer.close();
+
+    QuaZip zip(archivePath);
+    QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "inner.zip", nestedZipBytes);
+    zip.close();
+
+    const ArchiveReader::NestedExpansion expansion = ArchiveReader::expandNested(archivePath, "inner.zip");
+    QVERIFY(expansion.openedAsArchive);
+    QCOMPARE(expansion.entries.size(), 1);
+    QCOMPARE(expansion.entries.first().relativePath, QString("inner.zip/a.gtl"));
+}
+
+void TestArchiveReader::expandNestedRejectsNonZip()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString archivePath = dir.filePath("top.zip");
+
+    QuaZip zip(archivePath);
+    QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "notes.zip", "not a zip");
+    zip.close();
+
+    const ArchiveReader::NestedExpansion expansion = ArchiveReader::expandNested(archivePath, "notes.zip");
+    QVERIFY(!expansion.openedAsArchive);
+    QVERIFY(expansion.entries.isEmpty());
+}
+
+void TestArchiveReader::expandNestedGrandchildCandidate()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString archivePath = dir.filePath("top.zip");
+
+    // deep.zip's own bytes don't matter here - it just needs to look like a
+    // candidate by name; expandNested(inner.zip) must not recurse into it.
+    QByteArray deepZipBytes;
+    QBuffer deepBuffer(&deepZipBytes);
+    QVERIFY(deepBuffer.open(QIODevice::WriteOnly));
+    QuaZip deepZip(&deepBuffer);
+    QVERIFY(deepZip.open(QuaZip::mdCreate));
+    addEntry(deepZip, "z.gtl", "G04 two levels deep*\n");
+    deepZip.close();
+    deepBuffer.close();
+
+    QByteArray innerZipBytes;
+    QBuffer innerBuffer(&innerZipBytes);
+    QVERIFY(innerBuffer.open(QIODevice::WriteOnly));
+    QuaZip innerZip(&innerBuffer);
+    QVERIFY(innerZip.open(QuaZip::mdCreate));
+    addEntry(innerZip, "deep.zip", deepZipBytes);
+    innerZip.close();
+    innerBuffer.close();
+
+    QuaZip zip(archivePath);
+    QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "inner.zip", innerZipBytes);
+    zip.close();
+
+    const ArchiveReader::NestedExpansion expansion = ArchiveReader::expandNested(archivePath, "inner.zip");
+    QVERIFY(expansion.openedAsArchive);
+    QCOMPARE(expansion.entries.size(), 1);
+    QCOMPARE(expansion.entries.first().relativePath, QString("inner.zip/deep.zip"));
+    QVERIFY(expansion.entries.first().isNestedArchiveCandidate);
+}
+
+void TestArchiveReader::expandNestedInsideExpanded()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString archivePath = dir.filePath("top.zip");
+
+    QByteArray deepZipBytes;
+    QBuffer deepBuffer(&deepZipBytes);
+    QVERIFY(deepBuffer.open(QIODevice::WriteOnly));
+    QuaZip deepZip(&deepBuffer);
+    QVERIFY(deepZip.open(QuaZip::mdCreate));
+    addEntry(deepZip, "z.gtl", "G04 two levels deep*\n");
+    deepZip.close();
+    deepBuffer.close();
+
+    QByteArray innerZipBytes;
+    QBuffer innerBuffer(&innerZipBytes);
+    QVERIFY(innerBuffer.open(QIODevice::WriteOnly));
+    QuaZip innerZip(&innerBuffer);
+    QVERIFY(innerZip.open(QuaZip::mdCreate));
+    addEntry(innerZip, "deep.zip", deepZipBytes);
+    innerZip.close();
+    innerBuffer.close();
+
+    QuaZip zip(archivePath);
+    QVERIFY(zip.open(QuaZip::mdCreate));
+    addEntry(zip, "inner.zip", innerZipBytes);
+    zip.close();
+
+    // "inner.zip/deep.zip" isn't a direct child of the top-level archive -
+    // reaching it requires descending through inner.zip first, exactly the
+    // same multi-level walk readEntryBytes/readEntryHead already use.
+    const ArchiveReader::NestedExpansion expansion =
+        ArchiveReader::expandNested(archivePath, "inner.zip/deep.zip");
+    QVERIFY(expansion.openedAsArchive);
+    QCOMPARE(expansion.entries.size(), 1);
+    QCOMPARE(expansion.entries.first().relativePath, QString("inner.zip/deep.zip/z.gtl"));
 }
 
 void TestArchiveReader::misnamedZipFileIsReadable()
@@ -334,31 +525,6 @@ void TestArchiveReader::misnamedZipFileIsReadable()
 
     const QByteArray bytes = ArchiveReader::readEntryBytes(archivePath, "notes.zip");
     QCOMPARE(bytes, QByteArray("not a zip"));
-}
-
-void TestArchiveReader::genuineNestedZipStillFlattens()
-{
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QString archivePath = dir.filePath("top.zip");
-
-    QByteArray nestedZipBytes;
-    QBuffer nestedBuffer(&nestedZipBytes);
-    QVERIFY(nestedBuffer.open(QIODevice::WriteOnly));
-    QuaZip nestedZip(&nestedBuffer);
-    QVERIFY(nestedZip.open(QuaZip::mdCreate));
-    addEntry(nestedZip, "inner.gtl", "G04 inside real nested zip*\n");
-    nestedZip.close();
-    nestedBuffer.close();
-
-    QuaZip zip(archivePath);
-    QVERIFY(zip.open(QuaZip::mdCreate));
-    addEntry(zip, "nested.zip", nestedZipBytes);
-    zip.close();
-
-    const QVector<ArchiveReader::RawFileEntry> entries = ArchiveReader::readArchive(archivePath);
-    QCOMPARE(entries.size(), 1);
-    QCOMPARE(entries.first().relativePath, QString("nested.zip/inner.gtl"));
 }
 
 void TestArchiveReader::readEntryHeadTruncates()
