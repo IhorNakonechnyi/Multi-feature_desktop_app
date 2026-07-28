@@ -111,8 +111,9 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(12);
 
-    // Pairs card: which changed Gerber pairs can be previewed, plus the
-    // messaging for pairs that can't be (unrecognized extension, drill).
+    // Pairs card: which changed Gerber/drill pairs can be previewed, plus a
+    // count of the ones that can't (neither side classified as drawable
+    // content - Q2/Q12).
     auto *pairsCard = new QWidget;
     pairsCard->setObjectName("pairsCard");
     pairsCard->setAttribute(Qt::WA_StyledBackground, true);
@@ -130,23 +131,14 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     pairStatusLabel_ = new QLabel;
     pairStatusLabel_->setObjectName("detailLabel");
     pairStatusLabel_->setWordWrap(true);
-    skippedUnrecognizedLabel_ = new QLabel;
-    skippedUnrecognizedLabel_->setWordWrap(true);
-    skippedUnrecognizedLabel_->setVisible(false);
-    skippedUnrecognizedButtonRow_ = new QWidget;
-    auto *skippedButtonLayout = new QHBoxLayout(skippedUnrecognizedButtonRow_);
-    skippedButtonLayout->setContentsMargins(0, 0, 0, 0);
-    skippedUnrecognizedButtonRow_->setVisible(false);
-    skippedDrillLabel_ = new QLabel;
-    skippedDrillLabel_->setWordWrap(true);
-    skippedDrillLabel_->setVisible(false);
+    notDrawableLabel_ = new QLabel;
+    notDrawableLabel_->setWordWrap(true);
+    notDrawableLabel_->setVisible(false);
 
     pairsCardLayout->addWidget(explanation);
     pairsCardLayout->addWidget(gerberPairList_);
     pairsCardLayout->addWidget(pairStatusLabel_);
-    pairsCardLayout->addWidget(skippedUnrecognizedLabel_);
-    pairsCardLayout->addWidget(skippedUnrecognizedButtonRow_);
-    pairsCardLayout->addWidget(skippedDrillLabel_);
+    pairsCardLayout->addWidget(notDrawableLabel_);
 
     // Canvas card: the Gerber overlay render, inset in its own card.
     auto *canvasCard = new QWidget;
@@ -195,6 +187,7 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
     connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
     connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
+
     connect(gerberPairList_, &QListWidget::currentRowChanged, this,
             [this](int row) { if (row >= 0) showSelectedPair(); });
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownPair);
@@ -252,7 +245,24 @@ void ArchiveComparePage::runComparison()
     // already done.
     compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs));
 
-    eligiblePairs_ = GerberDiffTrigger::eligiblePairs(outcome.result.differingPairs);
+    // Content, not extension, decides which pairs the overlay can draw
+    // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
+    // design.md). Each reader only reads the small head each side actually
+    // needs classified - readEntryHead caps the read at
+    // GerberFileType::kClassifySniffBytes instead of decompressing the
+    // whole entry, which matters because a differing pair's real file can
+    // run tens of KB and classification only ever looks at the first few
+    // lines.
+    const auto readHeadA = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(panelA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
+    const auto readHeadB = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(panelB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
+    const GerberDiffTrigger::PairBuckets buckets =
+        GerberDiffTrigger::classifyPairs(outcome.result.differingPairs, readHeadA, readHeadB);
+
+    eligiblePairs_ = buckets.drawable;
     gerberPairList_->clear();
     for (const auto &pair : eligiblePairs_) {
         gerberPairList_->addItem(formatPairLabel(pair));
@@ -264,54 +274,24 @@ void ArchiveComparePage::runComparison()
     // the Detail card until the user clicks a new pair.
     renderTimeLabel_->setText(tr("Render time: -"));
 
-    const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(outcome.result.differingPairs);
-    const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(outcome.result.differingPairs);
-    rebuildSkippedPairsUi(unrecognized, drill);
+    updateNotDrawableLabel(buckets.notDrawable.size());
 }
 
-void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized,
-                                               const QVector<DifferingPair> &drill)
+void ArchiveComparePage::updateNotDrawableLabel(int count)
 {
-    // Clear old buttons before rebuilding - runComparison() re-runs on
-    // every archive change, and the previous run's buttons captured the
-    // previous run's lambda state.
-    QLayoutItem *item;
-    while ((item = skippedUnrecognizedButtonRow_->layout()->takeAt(0)) != nullptr) {
-        delete item->widget();
-        delete item;
+    // The mixed drill/Gerber special case and its "Add .<ext>" button are
+    // both gone (Q2/Q12 - see the content-based-drawability design doc):
+    // drawability is content-only now, so there's nothing left for a
+    // button to add, and a drill-vs-Gerber pair is drawable like any other
+    // pair, not a separate rejection reason. What's left is one plain
+    // count of pairs where at least one side didn't classify as drawable.
+    if (count == 0) {
+        notDrawableLabel_->setVisible(false);
+        return;
     }
-
-    // The "Add .<ext>" button row is gone: GerberFileType::addUserExtension
-    // was deleted along with the rest of the extension mechanism (Q12) - it
-    // could no longer do anything useful, since a file the sniff can't find
-    // %FS/%MO/M48 in has no coordinate format to parse regardless of what
-    // extension is forced onto it. skippedUnrecognizedButtonRow_ therefore
-    // stays permanently empty and hidden; only its label - the user's
-    // signal that something was dropped - still appears. Bucketing this
-    // list by content instead of by extension is Task 10's job (content-
-    // based-drawability design doc); until then this stays wired to
-    // GerberDiffTrigger::unrecognizedPairs' existing (extension-based)
-    // output.
-    skippedUnrecognizedButtonRow_->setVisible(false);
-    if (unrecognized.isEmpty()) {
-        skippedUnrecognizedLabel_->setVisible(false);
-    } else {
-        skippedUnrecognizedLabel_->setText(
-            tr("%1 changed pair(s) skipped - unrecognized file extension.").arg(unrecognized.size()));
-        skippedUnrecognizedLabel_->setVisible(true);
-    }
-
-    if (drill.isEmpty()) {
-        skippedDrillLabel_->setVisible(false);
-    } else {
-        // No button: these are mixed pairs (one side drill, one side non-drill).
-        // The app can read Excellon drill files (M5 complete), but comparing
-        // a drill file's holes against a copper Gerber layer's traces is
-        // structurally meaningless - nothing the user clicks here would help.
-        skippedDrillLabel_->setText(
-            tr("%1 mixed drill/Gerber pair(s) skipped - drill files cannot be compared with non-drill layers.").arg(drill.size()));
-        skippedDrillLabel_->setVisible(true);
-    }
+    notDrawableLabel_->setText(
+        tr("%n changed pair(s) can't be previewed - not recognized as Gerber or drill data.", "", count));
+    notDrawableLabel_->setVisible(true);
 }
 
 // Picks GerberParser or ExcellonParser by the entry's own content

@@ -29,7 +29,7 @@ public:
 
 private:
     void runComparison();
-    void rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized, const QVector<DifferingPair> &drill);
+    void updateNotDrawableLabel(int count);
     void showSelectedPair();
     void renderShownPair(const QRectF &windowMm, double pxPerMm);
     Layer parseGerberOrDrill(const QByteArray &bytes, QString &parseError);
@@ -39,9 +39,7 @@ private:
 
     QListWidget *gerberPairList_;
     QLabel *pairStatusLabel_;
-    QLabel *skippedUnrecognizedLabel_;
-    QWidget *skippedUnrecognizedButtonRow_;
-    QLabel *skippedDrillLabel_;
+    QLabel *notDrawableLabel_;
     QLabel *renderTimeLabel_;
     QLabel *compareTimeLabel_;
     CompositeView *gerberCanvas_;
