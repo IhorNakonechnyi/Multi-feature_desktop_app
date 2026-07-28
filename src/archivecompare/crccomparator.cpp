@@ -1,5 +1,6 @@
 #include "crccomparator.h"
 
+#include <QFileInfo>
 #include <QHash>
 #include <QPair>
 #include <QSet>
@@ -206,9 +207,75 @@ ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entr
         }
     }
 
-    // Step 5 (of this task; the design's step 5 extension pass is a later
-    // task): anything still unplaced has no counterpart on the other side
-    // by either content or name - red.
+    // Step 5: extension elimination pass over whatever content matching and
+    // the name pass both failed to place. This is deliberately the last
+    // and weakest fallback, and its guard is much stricter than the name
+    // pass's for a reason: a shared extension is not evidence that two
+    // files correspond, only an elimination argument - "these are the only
+    // two files left unaccounted for with this extension, on each side, so
+    // they probably correspond." In a real PCB archive an entire layer set
+    // routinely shares one generic extension (e.g. every drill file), so
+    // the moment there is more than one leftover candidate under an
+    // extension on EITHER side, the elimination stops being unambiguous
+    // and nothing is paired - unlike the name pass, there is no cross
+    // product fallback here. Guessing wrong here would silently point the
+    // user at the wrong file to diff, which is worse than leaving both
+    // sides red for a human to sort out. Classes whose representative path
+    // has no extension are skipped outright - QFileInfo::suffix() returns
+    // an empty string for those, and an empty string is not a real key to
+    // eliminate on (it would falsely lump together every extension-less
+    // file in the archive as if they were one candidate pool).
+    QHash<QString, QVector<ClassKey>> leftoverExtensionsA;
+    for (auto it = classesA.constBegin(); it != classesA.constEnd(); ++it) {
+        if (placedA.contains(it.key())) {
+            continue;
+        }
+        const QString extension =
+            QFileInfo(entriesA.at(it.value().representativeIndex).relativePath).suffix().toLower();
+        if (extension.isEmpty()) {
+            continue;
+        }
+        leftoverExtensionsA[extension].append(it.key());
+    }
+    QHash<QString, QVector<ClassKey>> leftoverExtensionsB;
+    for (auto it = classesB.constBegin(); it != classesB.constEnd(); ++it) {
+        if (placedB.contains(it.key())) {
+            continue;
+        }
+        const QString extension =
+            QFileInfo(entriesB.at(it.value().representativeIndex).relativePath).suffix().toLower();
+        if (extension.isEmpty()) {
+            continue;
+        }
+        leftoverExtensionsB[extension].append(it.key());
+    }
+
+    for (auto it = leftoverExtensionsA.constBegin(); it != leftoverExtensionsA.constEnd(); ++it) {
+        if (it.value().size() != 1) {
+            // More than one leftover class shares this extension in A -
+            // no way to tell which one (if any) corresponds to B's side.
+            continue;
+        }
+        const auto itB = leftoverExtensionsB.constFind(it.key());
+        if (itB == leftoverExtensionsB.constEnd() || itB.value().size() != 1) {
+            // Nothing under this extension in B, or more than one there
+            // too - same "can't tell which" problem, mirrored on B's side.
+            continue;
+        }
+        const ClassKey &aKey = it.value().first();
+        const ClassKey &bKey = itB.value().first();
+        const int repIndexA = classesA.constFind(aKey)->representativeIndex;
+        const int repIndexB = classesB.constFind(bKey)->representativeIndex;
+        result.entriesA[repIndexA].classification = EntryClassification::Different;
+        result.entriesB[repIndexB].classification = EntryClassification::Different;
+        placedA.insert(aKey);
+        placedB.insert(bKey);
+        result.differingPairs.append(
+            {entriesA.at(repIndexA).relativePath, entriesB.at(repIndexB).relativePath, PairReason::OnlyExtensionCandidate});
+    }
+
+    // Step 6: anything still unplaced has no counterpart on the other side
+    // by content, name, or extension elimination - red.
     for (auto it = classesA.constBegin(); it != classesA.constEnd(); ++it) {
         if (!placedA.contains(it.key())) {
             result.entriesA[it.value().representativeIndex].classification = EntryClassification::OnlyInThisArchive;
