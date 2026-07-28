@@ -45,6 +45,7 @@ private slots:
     void extensionPassSkipsNoExtension();
     void extensionPassIsCaseInsensitive();
     void nameePassWinsOverExtensionPass();
+    void extensionPassIgnoresClassAlreadyPlacedByContentMatch();
     void noOrphanYellow();
     void pairReasonRecorded();
 };
@@ -560,6 +561,37 @@ void TestArchiveComparator::nameePassWinsOverExtensionPass()
     QCOMPARE(result.differingPairs[1].relativePathA, QLatin1String("old.gtl"));
     QCOMPARE(result.differingPairs[1].relativePathB, QLatin1String("new.gtl"));
     QCOMPARE(static_cast<int>(result.differingPairs[1].reason),
+             static_cast<int>(PairReason::OnlyExtensionCandidate));
+}
+
+// A class that content matching already placed must not count toward the
+// extension pass's candidate tally for its extension - only genuinely
+// UNPLACED classes are candidates. "same.txt" is byte-identical on both
+// sides, so step 3 (content match) consumes it and marks it green before
+// the extension pass ever runs; that leaves exactly one real leftover class
+// per side under ".txt" ("new.txt" in A, "old.txt" in B), which is a
+// legitimate single-candidate elimination. If the already-placed "same.txt"
+// class were (incorrectly) still counted as a second ".txt" candidate, the
+// guard would see two candidates on each side and refuse to pair anything -
+// this test would catch that regression, which the noOrphanYellow sweep
+// cannot (it only inspects entries already classified Different, so a
+// regression that makes the pass stop firing here would silently pass that
+// sweep with the leftovers landing on OnlyInThisArchive instead).
+void TestArchiveComparator::extensionPassIgnoresClassAlreadyPlacedByContentMatch()
+{
+    const QVector<ArchiveReader::RawFileEntry> a = {make("same.txt", 111, 10), make("new.txt", 5, 1)};
+    const QVector<ArchiveReader::RawFileEntry> b = {make("same.txt", 111, 10), make("old.txt", 6, 1)};
+
+    const ArchiveComparisonResult result = CrcComparator::compare(a, b);
+
+    QCOMPARE(static_cast<int>(result.entriesA[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(static_cast<int>(result.entriesB[0].classification), static_cast<int>(EntryClassification::Identical));
+    QCOMPARE(static_cast<int>(result.entriesA[1].classification), static_cast<int>(EntryClassification::Different));
+    QCOMPARE(static_cast<int>(result.entriesB[1].classification), static_cast<int>(EntryClassification::Different));
+    QCOMPARE(result.differingPairs.size(), 1);
+    QCOMPARE(result.differingPairs[0].relativePathA, QLatin1String("new.txt"));
+    QCOMPARE(result.differingPairs[0].relativePathB, QLatin1String("old.txt"));
+    QCOMPARE(static_cast<int>(result.differingPairs[0].reason),
              static_cast<int>(PairReason::OnlyExtensionCandidate));
 }
 

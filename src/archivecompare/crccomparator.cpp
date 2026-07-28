@@ -270,8 +270,9 @@ ArchiveComparisonResult CrcComparator::compare(const QVector<RawFileEntry> &entr
         result.entriesB[repIndexB].classification = EntryClassification::Different;
         placedA.insert(aKey);
         placedB.insert(bKey);
-        result.differingPairs.append(
-            {entriesA.at(repIndexA).relativePath, entriesB.at(repIndexB).relativePath, PairReason::OnlyExtensionCandidate});
+        result.differingPairs.append({entriesA.at(repIndexA).relativePath,
+                                       entriesB.at(repIndexB).relativePath,
+                                       PairReason::OnlyExtensionCandidate});
     }
 
     // Step 6: anything still unplaced has no counterpart on the other side
