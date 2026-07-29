@@ -1,5 +1,7 @@
 #include "archivereader.h"
 
+#include <functional>
+
 #include <QBuffer>
 #include <QFileInfo>
 #include <QObject>
@@ -11,19 +13,13 @@
 
 namespace {
 
-bool isNestedArchiveName(const QString &name)
-{
-    // Only .zip is in scope (research.md: RAR dropped for Phase 1 -
-    // licensing, no bundled RAR code).
-    return name.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive);
-}
-
-// Walks every file in an already-open QuaZip, appending flattened entries
-// to `out`. When an entry is itself a nested zip, its bytes are read into
-// memory and recursed into with its own name appended to pathPrefix - that
-// is what makes a file inside a nested archive show at its true leaf
-// location instead of just "some zip file differs".
-void readEntriesFrom(QuaZip &zip, const QString &pathPrefix, QVector<ArchiveReader::RawFileEntry> &out)
+// Lists ONE level of an already-open QuaZip, appending entries to `out`
+// with pathPrefix prepended (empty for the top level; the container's own
+// relativePath + '/' when called from expandNested). This never recurses
+// into nested zips itself - a candidate is listed as one opaque entry and
+// left for a later expandNested() call to open, per Q4/Q3 (see
+// archivereader.h).
+void readOneLevel(QuaZip &zip, const QString &pathPrefix, QVector<ArchiveReader::RawFileEntry> &out)
 {
     if (!zip.goToFirstFile()) {
         return;
@@ -49,95 +45,127 @@ void readEntriesFrom(QuaZip &zip, const QString &pathPrefix, QVector<ArchiveRead
 
         const QString fullPath = pathPrefix.isEmpty() ? entryName : pathPrefix + QLatin1Char('/') + entryName;
 
-        if (isNestedArchiveName(entryName)) {
-            QuaZipFile nestedFile(&zip);
-            if (!nestedFile.open(QIODevice::ReadOnly)) {
-                continue; // unreadable nested archive - skip it, don't fail the whole read
-            }
-            QByteArray nestedBytes = nestedFile.readAll();
-            nestedFile.close();
-
-            QBuffer buffer(&nestedBytes);
-            if (!buffer.open(QIODevice::ReadOnly)) {
-                continue;
-            }
-
-            QuaZip nestedZip(&buffer);
-            if (nestedZip.open(QuaZip::mdUnzip)) {
-                readEntriesFrom(nestedZip, fullPath, out);
-                nestedZip.close();
-            }
-            buffer.close();
-        } else {
-            ArchiveReader::RawFileEntry entry;
-            entry.relativePath = fullPath;
-            entry.crc32 = info.crc;
-            entry.sizeBytes = info.uncompressedSize;
-            out.append(entry);
-        }
+        ArchiveReader::RawFileEntry entry;
+        entry.relativePath = fullPath;
+        entry.crc32 = info.crc;
+        entry.sizeBytes = info.uncompressedSize;
+        // Only .zip is in scope (research.md: RAR dropped for Phase 1 -
+        // licensing, no bundled RAR code). This is a cheap NAME filter only
+        // - see the struct comment in archivereader.h for why content, not
+        // the name, makes the final call.
+        entry.isNestedArchiveCandidate = entryName.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive);
+        out.append(entry);
     } while (zip.goToNextFile());
 }
 
-// QuaZip::setCurrentFile() looks a name up against each entry's raw,
-// as-stored name with no separator normalization at all (confirmed by
-// reading QuaZip's own setCurrentFile()/getCurrentFileInfo() in
-// quazip.cpp) - but entryRelativePath always arrives '/'-normalized (see
-// readEntriesFrom above), so a zip whose writer stored '\'-separated
-// names (again, PowerShell's Compress-Archive) would never match by
-// plain setCurrentFile(entryName). Scan the zip's own stored name list,
-// normalize each one the same way readEntriesFrom does, and compare
-// against the already-normalized entryName - then hand setCurrentFile
-// the *actual* stored name (not the normalized one) since that's the
-// only string its exact lookup will accept. Returns an empty string if
-// no entry's normalized name matches.
-QString findStoredEntryName(QuaZip &zip, const QString &normalizedName)
+// Result of resolving one path step (see resolveStep below) against a
+// single open zip level.
+struct ResolvedStep {
+    QString storedName; // raw stored name as setCurrentFile() needs it; empty = no match
+    bool    isFinal;    // storedName covers the whole remaining path
+    QString rest;       // remainder after storedName + '/', when !isFinal
+};
+
+// One step of resolving a '/'-normalized remaining path against whatever
+// entries a single zip level actually has stored. Two things make this more
+// than a plain lookup:
+//
+// 1. QuaZip::setCurrentFile() matches against each entry's raw, as-stored
+//    name with no separator normalization at all (confirmed by reading
+//    QuaZip's own setCurrentFile()/getCurrentFileInfo() in quazip.cpp), but
+//    normalizedRemaining always arrives '/'-normalized (see readOneLevel
+//    above) - so a zip whose writer stored '\'-separated names (e.g.
+//    PowerShell's Compress-Archive) would never match by a plain lookup of
+//    normalizedRemaining itself. Every stored name is normalized the same
+//    way before comparing, then the *actual* stored name is returned, since
+//    that's the only string setCurrentFile's exact lookup will accept.
+//
+// 2. A single stored entry name can itself contain '/' - both because a
+//    plain subfolder entry is one stored name ("docs/board.gtl", not
+//    separate "docs" and "board.gtl" entries) and because a nested zip's
+//    own name can sit under a subfolder ("wrapper/nested.zip" is one
+//    entry). So there is no such thing as "the next path segment" in
+//    general; the only reliable way to know where one entry's name ends is
+//    to check what names actually exist.
+//
+// That is what the two rules below do, in this exact order:
+//
+//   1. Exact match: some stored name, normalized, equals the *whole*
+//      remaining path. This must be tried first - see the walkthrough
+//      below.
+//   2. Prefix descent: no exact match, but some stored name S is a proper
+//      prefix of the remaining path followed by '/'. The *longest* such S
+//      is used, so a deeper nested-zip name never loses to a shallower one
+//      that also happens to prefix-match.
+//
+// Trying (1) before (2) is what makes a plain *folder* named "gerber.zip"
+// work correctly. Given a stored entry "gerber.zip/top.gtl" (an ordinary
+// subfolder that happens to end in ".zip") and remaining path
+// "gerber.zip/top.gtl", rule 1 matches the whole path directly and the walk
+// ends there. If prefix descent were tried first (or the old code's
+// approach of always treating ".zip/" as a boundary), "gerber.zip" would be
+// mistaken for a nested archive to open - but no entry is stored under that
+// exact name, so the lookup would fail even though the file plainly exists.
+ResolvedStep resolveStep(QuaZip &zip, const QString &normalizedRemaining)
 {
     const QStringList storedNames = zip.getFileNameList();
+
+    // Windows (this app's only target platform) treats zip entry names
+    // case-insensitively by default - matching QuaZip::setCurrentFile's own
+    // csDefault behavior there keeps this lookup consistent with what
+    // setCurrentFile would have done had the separators matched.
     for (const QString &storedName : storedNames) {
         const QString normalizedStoredName = QString(storedName).replace(QLatin1Char('\\'), QLatin1Char('/'));
-        // Windows (this app's only target platform) treats zip entry names
-        // case-insensitively by default - matching QuaZip::setCurrentFile's
-        // own csDefault behavior there keeps this lookup consistent with
-        // what setCurrentFile would have done had the separators matched.
-        if (normalizedStoredName.compare(normalizedName, Qt::CaseInsensitive) == 0) {
-            return storedName;
+        if (normalizedStoredName.compare(normalizedRemaining, Qt::CaseInsensitive) == 0) {
+            return ResolvedStep{storedName, true, QString()};
         }
     }
-    return QString();
-}
 
-} // namespace
-
-QVector<ArchiveReader::RawFileEntry> ArchiveReader::readArchive(const QString &filePath)
-{
-    QuaZip zip(filePath);
-    if (!zip.open(QuaZip::mdUnzip)) {
-        throw ArchiveOpenError(
-            QObject::tr("Could not open \"%1\" - it may be corrupt, password-protected, "
-                        "or not a valid zip file.")
-                .arg(QFileInfo(filePath).fileName()));
+    QString longestPrefixStoredName;
+    QString longestPrefixNormalized;
+    for (const QString &storedName : storedNames) {
+        const QString normalizedStoredName = QString(storedName).replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString prefix = normalizedStoredName + QLatin1Char('/');
+        if (normalizedRemaining.startsWith(prefix, Qt::CaseInsensitive)
+            && normalizedStoredName.length() > longestPrefixNormalized.length()) {
+            longestPrefixStoredName = storedName;
+            longestPrefixNormalized = normalizedStoredName;
+        }
+    }
+    if (!longestPrefixStoredName.isEmpty()) {
+        return ResolvedStep{longestPrefixStoredName, false,
+                             normalizedRemaining.mid(longestPrefixNormalized.length() + 1)};
     }
 
-    QVector<RawFileEntry> entries;
-    readEntriesFrom(zip, QString(), entries);
-    zip.close();
-    return entries;
+    return ResolvedStep{QString(), false, QString()};
 }
 
-QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath)
+// Shared by readEntryBytes and readEntryHead: both resolve entryRelativePath
+// one step at a time via resolveStep, descending into nested zips exactly
+// the same way - the only difference between the two public functions is
+// what to do with the *final* entry once found (read it all vs. read only a
+// prefix), which `finalRead` supplies. Every intermediate nested-zip level
+// still has to be read in full regardless of which public function is
+// calling - a nested zip has to be opened whole before it can be walked
+// into further, there's no way to peek at just part of it.
+QByteArray readEntryWalk(const QString &archiveFilePath, const QString &entryRelativePath, bool *found,
+                          const std::function<QByteArray(QuaZipFile &)> &finalRead)
 {
-    // entryRelativePath is one of readArchive's flattened paths (see
-    // readEntriesFrom above): at each zip level it's built from that
-    // level's own *raw* entry name, which can itself contain '/' when the
-    // entry sits in a plain subfolder (e.g. a top-level entry literally
-    // named "wrapper/archive3.zip"). So this can't just split on every
-    // '/' and look each piece up individually - QuaZip::setCurrentFile
-    // needs the *exact* stored entry name, slash and all. Instead, scan
-    // forward for the next ".zip/" boundary: everything up to and
-    // including ".zip" is one zip level's entry name; if that's a nested
-    // zip, descend into its bytes and repeat with what's left. Once no
-    // further ".zip/" boundary remains, whatever's left (still possibly
-    // containing '/' for a plain subfolder) is the final entry to read.
+    if (found) {
+        *found = false;
+    }
+    // entryRelativePath is one of readTopLevel's/expandNested's flattened
+    // paths (see readOneLevel above): at each zip level it's built from
+    // that level's own *raw* entry name, which can itself contain '/' when
+    // the entry sits in a plain subfolder (e.g. a top-level entry literally
+    // named "wrapper/archive3.zip"). There's no way to know in advance
+    // where one zip level's entry name ends and the next level's path
+    // begins - not by splitting on '/', and not (the old approach here) by
+    // treating every ".zip/" as a boundary, since a plain folder can
+    // legitimately be named "gerber.zip" too. So each step is resolved
+    // against whatever entries the current zip level actually has stored
+    // (resolveStep, above) - the name is only ever a candidate, content
+    // (does it open as a zip?) decides whether to descend further.
     QuaZip zip(archiveFilePath);
     if (!zip.open(QuaZip::mdUnzip)) {
         return QByteArray();
@@ -150,30 +178,34 @@ QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const Q
     QString remainingPath = entryRelativePath;
 
     while (true) {
-        const int zipSuffixPos = remainingPath.indexOf(QLatin1String(".zip/"), 0, Qt::CaseInsensitive);
-        const bool isLastSegment = (zipSuffixPos < 0);
-        const QString entryName = isLastSegment ? remainingPath : remainingPath.left(zipSuffixPos + 4); // +4: include ".zip"
-
-        // entryName is always '/'-normalized; resolve it to whatever this
-        // zip level actually stored (see findStoredEntryName above) before
-        // handing it to setCurrentFile, which needs the exact raw name.
-        const QString storedEntryName = findStoredEntryName(*currentZip, entryName);
-        if (storedEntryName.isEmpty() || !currentZip->setCurrentFile(storedEntryName)) {
-            return QByteArray();
+        const ResolvedStep step = resolveStep(*currentZip, remainingPath);
+        if (step.storedName.isEmpty() || !currentZip->setCurrentFile(step.storedName)) {
+            return QByteArray(); // no entry at this level matches what's left of the path
         }
+
         QuaZipFile file(currentZip);
         if (!file.open(QIODevice::ReadOnly)) {
             return QByteArray();
         }
+
+        if (step.isFinal) {
+            const QByteArray result = finalRead(file);
+            file.close();
+            if (found) {
+                *found = true;
+            }
+            return result;
+        }
+
+        // Not final - step.storedName matched a path prefix, so it must
+        // itself open as a nested zip to keep descending. If it doesn't
+        // (this "prefix" was actually the target file's whole content,
+        // e.g. a non-zip file that just happens to share a name prefix),
+        // the path is bogus - report not found rather than returning
+        // unrelated bytes.
         const QByteArray bytes = file.readAll();
         file.close();
 
-        if (isLastSegment) {
-            return bytes;
-        }
-
-        // Not the last segment - this must itself be a nested zip to
-        // descend into.
         currentArchiveBytes = bytes;
         nestedBuffer.reset(new QBuffer(&currentArchiveBytes));
         if (!nestedBuffer->open(QIODevice::ReadOnly)) {
@@ -184,6 +216,76 @@ QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const Q
             return QByteArray();
         }
         currentZip = nestedZip.data();
-        remainingPath = remainingPath.mid(zipSuffixPos + 5); // +5: skip past ".zip/"
+        remainingPath = step.rest;
     }
+}
+
+} // namespace
+
+QVector<ArchiveReader::RawFileEntry> ArchiveReader::readTopLevel(const QString &filePath)
+{
+    QuaZip zip(filePath);
+    if (!zip.open(QuaZip::mdUnzip)) {
+        throw ArchiveOpenError(
+            QObject::tr("Could not open \"%1\" - it may be corrupt, password-protected, "
+                        "or not a valid zip file.")
+                .arg(QFileInfo(filePath).fileName()));
+    }
+
+    QVector<RawFileEntry> entries;
+    readOneLevel(zip, QString(), entries);
+    zip.close();
+    return entries;
+}
+
+ArchiveReader::NestedExpansion ArchiveReader::expandNested(const QString &archiveFilePath,
+                                                            const QString &containerRelativePath)
+{
+    NestedExpansion result;
+
+    // Reuse the exact same resolveStep-based descent readEntryBytes/
+    // readEntryHead use (readEntryWalk, in the anonymous namespace above) -
+    // containerRelativePath is resolved one step at a time just like any
+    // other entry path, which is what lets it reach a container that
+    // itself sits inside an already-expanded container (e.g.
+    // "inner.zip/deep.zip") without a third copy of the walk.
+    bool found = false;
+    const QByteArray containerBytes = readEntryWalk(archiveFilePath, containerRelativePath, &found,
+                                                      [](QuaZipFile &file) { return file.readAll(); });
+    if (!found) {
+        return result; // no entry at that path at all - openedAsArchive stays false
+    }
+
+    // The name matched the ".zip" candidate filter, but content decides
+    // (Q3): only bytes that actually open as a zip make this a container.
+    // Anything else - a plain file merely named "*.zip" - reports
+    // openedAsArchive=false so the caller keeps the original entry as an
+    // ordinary file instead.
+    QByteArray mutableContainerBytes = containerBytes;
+    QBuffer buffer(&mutableContainerBytes);
+    if (!buffer.open(QIODevice::ReadOnly)) {
+        return result;
+    }
+    QuaZip containerZip(&buffer);
+    if (!containerZip.open(QuaZip::mdUnzip)) {
+        return result;
+    }
+
+    readOneLevel(containerZip, containerRelativePath, result.entries);
+    containerZip.close();
+    result.openedAsArchive = true;
+    return result;
+}
+
+QByteArray ArchiveReader::readEntryBytes(const QString &archiveFilePath, const QString &entryRelativePath, bool *found)
+{
+    return readEntryWalk(archiveFilePath, entryRelativePath, found,
+                          [](QuaZipFile &file) { return file.readAll(); });
+}
+
+QByteArray ArchiveReader::readEntryHead(const QString &archiveFilePath, const QString &entryRelativePath,
+                                         qint64 maxBytes, bool *found)
+{
+    return readEntryWalk(archiveFilePath, entryRelativePath, found,
+                          [maxBytes](QuaZipFile &file) { return file.read(maxBytes); });
 }

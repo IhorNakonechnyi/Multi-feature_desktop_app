@@ -3,43 +3,49 @@
 #include <QWidget>
 
 #include "archivecomparisonresult.h"
+#include "archivetreemodel.h" // TreeFilter
 
 class QLabel;
-class QPushButton;
+class QStackedLayout;
 class QTreeView;
-class ArchiveTreeModel;
 
-// One side of the two-pane archive comparison: a header bar (current
-// filename + "Change..." button) plus a tree of that archive's classified
-// files. Two of these sit side-by-side in ArchiveComparePage.
+// The tree half of one side of the comparison. The header (filename, the
+// Change... button, the inline error) lives in ArchiveHeader, so the page can
+// put one filter bar between the two headers and the two trees (Q8).
+//
+// Still accepts drops in its own right: dropping a zip onto the file list is
+// at least as natural as dropping it onto the header strip. The path itself
+// belongs to the header, so a drop here is forwarded up as a signal rather
+// than stored.
 class ArchivePanel : public QWidget {
     Q_OBJECT
 
 public:
-    explicit ArchivePanel(const QString &roleLabel, QWidget *parent = nullptr);
-
-    QString archivePath() const { return archivePath_; }
+    explicit ArchivePanel(QWidget *parent = nullptr);
 
     // Rebuilds the visible tree from a freshly classified entry list.
     void showEntries(const QVector<ArchiveEntry> &entries);
 
+    void setFilter(const TreeFilter &filter);
+    bool isEmptyAfterFilter() const;
+
+    // Non-empty message replaces the tree with centered text; an empty
+    // string shows the tree again. An empty pane with no explanation reads
+    // as a bug, especially when the user has just switched a filter on.
+    void showEmptyMessage(const QString &message);
+
 signals:
-    // Emitted whenever the user picks or drops a new archive - the page
-    // re-runs the comparison once both panels have a path set.
-    void archiveChanged(const QString &path);
+    // A valid archive was dropped on the tree; the page hands it to this
+    // side's header, which owns the path.
+    void archiveDropped(const QString &path);
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
 
 private:
-    void pickArchive();
-    void setArchivePath(const QString &path);
-
-    QString roleLabel_;
-    QString archivePath_;
-    QLabel *fileNameLabel_;
-    QPushButton *changeButton_;
     QTreeView *treeView_;
     ArchiveTreeModel *model_;
+    QStackedLayout *stack_;
+    QLabel *emptyLabel_;
 };

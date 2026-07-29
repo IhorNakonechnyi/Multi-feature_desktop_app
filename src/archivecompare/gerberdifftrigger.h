@@ -1,31 +1,45 @@
 #pragma once
 
+#include <functional>
+
+#include <QByteArray>
+#include <QString>
 #include <QVector>
 
 #include "archivecomparisonresult.h"
 
-// Splits a comparison's DifferingPairs into three buckets the Archive
-// Compare UI acts on differently (2026-07-18-gerber-render-v2-m4-overlay-
-// design.md section 1, updated by 2026-07-19-gerber-render-v2-m5-drill-
-// design.md section 2): pairs the overlay can render now (both sides
-// Gerber, or both sides drill - dispatched to the matching parser), pairs
-// blocked only by an unrecognized extension (fixable via
-// GerberFileType::addUserExtension), and pairs with exactly one drill
-// side, which can never be compared (a drill file against a copper layer
-// is meaningless). A pair belongs to exactly one bucket - a mixed drill
-// pair is checked first, so a pair with one drill side and one
-// unrecognized side counts as drill (an Add-extension button could never
-// make it renderable).
+// Buckets a comparison's DifferingPairs by whether the overlay can draw
+// both sides (docs/superpowers/specs/2026-07-27-content-based-drawability-
+// design.md). Content decides, not the extension: each side's first
+// GerberFileType::kClassifySniffBytes bytes are run through
+// GerberFileType::classify(), and a pair is drawable when neither side
+// classifies as NotDrawable. There used to be a third bucket here for
+// "exactly one side is a drill file" - deleted (see the design doc's
+// "Removals" section): it was unreachable (every pair shares a filename, so
+// an extension-based drill test always agreed on both sides) and, even if
+// reached, would have been the wrong rule - the app doesn't police layer
+// semantics anywhere else, so a drill-vs-Gerber pair now renders like any
+// other mismatched pair and the user sees the mismatch on canvas.
 namespace GerberDiffTrigger {
 
-QVector<DifferingPair> eligiblePairs(const QVector<DifferingPair> &differingPairs);
+// Returns one side's head bytes for classify() to look at. A callback
+// rather than a direct ArchiveReader call so this module - and its tests -
+// don't need a real archive on disk; tests pass a lambda over an in-memory
+// fixture map instead. relativePath is whichever of a DifferingPair's two
+// paths is being asked about.
+using HeadReader = std::function<QByteArray(const QString &relativePath)>;
 
-// Blocked only by an unrecognized extension on at least one side - neither
-// side is a drill file.
-QVector<DifferingPair> unrecognizedPairs(const QVector<DifferingPair> &differingPairs);
+struct PairBuckets {
+    QVector<DifferingPair> drawable;    // both sides classify != NotDrawable
+    QVector<DifferingPair> notDrawable; // at least one side NotDrawable
+};
 
-// Exactly one side is a drill (Excellon) file - a both-drill pair is
-// eligible instead (see eligiblePairs).
-QVector<DifferingPair> drillPairs(const QVector<DifferingPair> &differingPairs);
+// readHeadA/readHeadB are asked about relativePathA/relativePathB
+// respectively - the two archives being compared, kept distinct because
+// content-first matching can pair files that sit at different paths (see
+// the content-first-archive-matching design doc), so a single reader over
+// one archive would silently miss the other side.
+PairBuckets classifyPairs(const QVector<DifferingPair> &pairs, const HeadReader &readHeadA,
+                           const HeadReader &readHeadB);
 
 } // namespace GerberDiffTrigger

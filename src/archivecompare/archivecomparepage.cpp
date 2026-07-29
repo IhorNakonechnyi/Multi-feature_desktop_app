@@ -2,11 +2,14 @@
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
-#include <QMessageBox>
-#include <QPushButton>
+#include <QResizeEvent>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -16,15 +19,18 @@
 #include "../gerber/gerberparser.h"
 #include "../gerber/layermaskrenderer.h"
 #include "../gerber/maskcompositor.h"
+#include "archivecomparison.h"
+#include "archiveheader.h"
 #include "archivepanel.h"
 #include "archivereader.h"
-#include "crccomparator.h"
+#include "comparisonsummary.h"
 #include "gerberdifftrigger.h"
 
 namespace {
 
-// New (A) in green, old (B) in red - MaskCompositor's additive overlap
-// (CompositionMode_Plus) turns unchanged copper yellow, matching
+// A in green, B in red - A and B are symmetric slots (either archive can be
+// loaded on either side), not "new"/"old". MaskCompositor's additive
+// overlap (CompositionMode_Plus) turns unchanged copper yellow, matching
 // CAMMaster's compare view (M4 design doc, section 2). Fixed for M4; a
 // color picker is an explicit non-goal until the overlay is in daily use.
 const QColor kColorA(60, 220, 60);
@@ -61,32 +67,53 @@ QWidget *makeColorLegendRow(const QColor &color, const QString &description)
 }
 
 // One list row's label: the A-side path, plus " <-> B-path" only when the
-// two sides differ (a filename-fallback match can pair files at different
-// paths - see the path-tolerant-matching design doc).
+// two sides differ (content-first matching's name/extension passes can pair
+// files at different paths - see the content-first-archive-matching design
+// doc), followed by the pair's reason. Every row gets a reason suffix, even
+// a same-path pair: content-first matching never treats "same path" as
+// proof, only as one more assumption the user must be able to see (Q1).
 QString formatPairLabel(const DifferingPair &pair)
 {
-    if (pair.relativePathA == pair.relativePathB) {
-        return pair.relativePathA;
+    QString label = (pair.relativePathA == pair.relativePathB)
+        ? pair.relativePathA
+        : QObject::tr("%1  <->  %2").arg(pair.relativePathA, pair.relativePathB);
+    switch (pair.reason) {
+    case PairReason::SameName:
+        label += QObject::tr(" - same name");
+        break;
+    case PairReason::OnlyExtensionCandidate:
+        label += QObject::tr(" - only .%1 left on each side")
+                      .arg(QFileInfo(pair.relativePathA).suffix().toLower());
+        break;
     }
-    return QObject::tr("%1  <->  %2").arg(pair.relativePathA, pair.relativePathB);
+    return label;
 }
 
-// Distinct lowercase file extensions among unrecognized pairs' paths (both
-// sides) - what the "Add extension" buttons are built from.
-// QFileInfo::suffix() matches the extraction GerberFileType::isRecognized
-// itself uses.
-QStringList distinctUnrecognizedExtensions(const QVector<DifferingPair> &unrecognizedPairs)
+// One kind's fragment of the summary line, e.g. "Gerber: 9 identical - 2
+// pairs - A: 1 to check". Identical and pairs are global facts about the
+// comparison; "to check" is per panel, because a missing file exists on one
+// side only by definition. Zero-valued fragments are dropped rather than
+// printed as "0", so the line stays short enough to read at a glance - and
+// an empty kind contributes nothing at all.
+QString formatTypeCounts(const QString &label, const ComparisonSummary::TypeCounts &counts)
 {
-    QStringList extensions;
-    for (const auto &pair : unrecognizedPairs) {
-        for (const QString &path : {pair.relativePathA, pair.relativePathB}) {
-            const QString extension = QFileInfo(path).suffix().toLower();
-            if (!extension.isEmpty() && !GerberFileType::isRecognized(path) && !extensions.contains(extension)) {
-                extensions.append(extension);
-            }
-        }
+    QStringList parts;
+    if (counts.identicalClasses > 0) {
+        parts << QObject::tr("%n identical", "", counts.identicalClasses);
     }
-    return extensions;
+    if (counts.pairs > 0) {
+        parts << QObject::tr("%n pair(s)", "", counts.pairs);
+    }
+    if (counts.onlyInA > 0) {
+        parts << QObject::tr("A: %n to check", "", counts.onlyInA);
+    }
+    if (counts.onlyInB > 0) {
+        parts << QObject::tr("B: %n to check", "", counts.onlyInB);
+    }
+    if (parts.isEmpty()) {
+        return {};
+    }
+    return QObject::tr("%1: %2").arg(label, parts.join(QStringLiteral(" · ")));
 }
 
 } // namespace
@@ -103,21 +130,70 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     title->setObjectName("pageTitle");
     layout->addWidget(title);
 
+    summaryLabel_ = new QLabel;
+    summaryLabel_->setObjectName("detailLabel");
+    layout->addWidget(summaryLabel_);
+
+    // A banner, deliberately not a modal: "the customer resent what we
+    // already have" is a common outcome, and making the user dismiss a
+    // dialog every time would tax the case that costs them the least work.
+    identicalBanner_ = new QLabel;
+    identicalBanner_->setObjectName("identicalBanner");
+    identicalBanner_->setWordWrap(true);
+    identicalBanner_->setVisible(false);
+    layout->addWidget(identicalBanner_);
+
     auto *contentRow = new QHBoxLayout;
     contentRow->setSpacing(12);
 
-    panelA_ = new ArchivePanel(tr("New"));
-    panelA_->setFixedWidth(252); // +20% over the original 210px
-    panelB_ = new ArchivePanel(tr("Old"));
-    panelB_->setFixedWidth(252);
-    contentRow->addWidget(panelA_);
-    contentRow->addWidget(panelB_);
+    // A and B are symmetric slots - either archive may be loaded on either
+    // side, so the labels name the slot, not an implied direction.
+    //
+    // Grid rather than two self-contained columns, because the filter bar
+    // has to span both: one bar acting on one tree would be ambiguous about
+    // whether the other tree is filtered too (Q8).
+    //
+    //   row 0:  headerA | headerB
+    //   row 1:  [ filter bar, spanning both ]
+    //   row 2:  panelA  | panelB
+    auto *archiveGrid = new QGridLayout;
+    archiveGrid->setSpacing(8);
+
+    // Widths are not fixed here - updatePanelWidths() sets them from the
+    // window size (see resizeEvent).
+    headerA_ = new ArchiveHeader(tr("A"));
+    headerB_ = new ArchiveHeader(tr("B"));
+    panelA_ = new ArchivePanel;
+    panelB_ = new ArchivePanel;
+    updatePanelWidths();
+
+    auto *controlBar = new QWidget;
+    auto *controlBarLayout = new QHBoxLayout(controlBar);
+    controlBarLayout->setContentsMargins(0, 0, 0, 0);
+    onlyChangesCheck_ = new QCheckBox(tr("Only changes"));
+    typeCombo_ = new QComboBox;
+    // -1 stands for "no kind filter"; the other two are DataKind values.
+    typeCombo_->addItem(tr("All types"), -1);
+    typeCombo_->addItem(tr("Gerber"), static_cast<int>(DataKind::GerberData));
+    typeCombo_->addItem(tr("Other"), static_cast<int>(DataKind::OtherData));
+    controlBarLayout->addWidget(onlyChangesCheck_);
+    controlBarLayout->addWidget(typeCombo_);
+    controlBarLayout->addStretch(1);
+
+    archiveGrid->addWidget(headerA_, 0, 0);
+    archiveGrid->addWidget(headerB_, 0, 1);
+    archiveGrid->addWidget(controlBar, 1, 0, 1, 2);
+    archiveGrid->addWidget(panelA_, 2, 0);
+    archiveGrid->addWidget(panelB_, 2, 1);
+    archiveGrid->setRowStretch(2, 1);
+    contentRow->addLayout(archiveGrid);
 
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(12);
 
-    // Pairs card: which changed Gerber pairs can be previewed, plus the
-    // messaging for pairs that can't be (unrecognized extension, drill).
+    // Pairs card: which changed Gerber/drill pairs can be previewed, plus a
+    // count of the ones that can't (neither side classified as drawable
+    // content - Q2/Q12).
     auto *pairsCard = new QWidget;
     pairsCard->setObjectName("pairsCard");
     pairsCard->setAttribute(Qt::WA_StyledBackground, true);
@@ -135,23 +211,14 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     pairStatusLabel_ = new QLabel;
     pairStatusLabel_->setObjectName("detailLabel");
     pairStatusLabel_->setWordWrap(true);
-    skippedUnrecognizedLabel_ = new QLabel;
-    skippedUnrecognizedLabel_->setWordWrap(true);
-    skippedUnrecognizedLabel_->setVisible(false);
-    skippedUnrecognizedButtonRow_ = new QWidget;
-    auto *skippedButtonLayout = new QHBoxLayout(skippedUnrecognizedButtonRow_);
-    skippedButtonLayout->setContentsMargins(0, 0, 0, 0);
-    skippedUnrecognizedButtonRow_->setVisible(false);
-    skippedDrillLabel_ = new QLabel;
-    skippedDrillLabel_->setWordWrap(true);
-    skippedDrillLabel_->setVisible(false);
+    notDrawableLabel_ = new QLabel;
+    notDrawableLabel_->setWordWrap(true);
+    notDrawableLabel_->setVisible(false);
 
     pairsCardLayout->addWidget(explanation);
     pairsCardLayout->addWidget(gerberPairList_);
     pairsCardLayout->addWidget(pairStatusLabel_);
-    pairsCardLayout->addWidget(skippedUnrecognizedLabel_);
-    pairsCardLayout->addWidget(skippedUnrecognizedButtonRow_);
-    pairsCardLayout->addWidget(skippedDrillLabel_);
+    pairsCardLayout->addWidget(notDrawableLabel_);
 
     // Canvas card: the Gerber overlay render, inset in its own card.
     auto *canvasCard = new QWidget;
@@ -163,7 +230,10 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     canvasCardLayout->addWidget(gerberCanvas_);
 
     // Detail card: the static overlay color legend, one color per line,
-    // with the render time right-aligned on the first line.
+    // with the render time right-aligned on the first line and the compare
+    // time right-aligned on the second (Q7: timing compare and render
+    // separately means a future slowdown can be attributed to the right
+    // half instead of guessed at).
     auto *detailCard = new QWidget;
     detailCard->setObjectName("detailCard");
     detailCard->setAttribute(Qt::WA_StyledBackground, true);
@@ -173,12 +243,19 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     renderTimeLabel_ = new QLabel(tr("Render time: -"));
     renderTimeLabel_->setObjectName("detailLabel");
     auto *firstLine = new QHBoxLayout;
-    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only new")));
+    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only in A")));
     firstLine->addStretch();
     firstLine->addWidget(renderTimeLabel_);
 
+    compareTimeLabel_ = new QLabel(tr("Compare time: -"));
+    compareTimeLabel_->setObjectName("detailLabel");
+    auto *secondLine = new QHBoxLayout;
+    secondLine->addWidget(makeColorLegendRow(kColorB, tr("only in B")));
+    secondLine->addStretch();
+    secondLine->addWidget(compareTimeLabel_);
+
     detailCardLayout->addLayout(firstLine);
-    detailCardLayout->addWidget(makeColorLegendRow(kColorB, tr("only old")));
+    detailCardLayout->addLayout(secondLine);
     detailCardLayout->addWidget(makeColorLegendRow(kColorOverlap, tr("same")));
 
     rightColumn->addWidget(pairsCard);
@@ -188,8 +265,17 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     contentRow->addLayout(rightColumn, 1);
     layout->addLayout(contentRow, 1);
 
-    connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
-    connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
+    connect(headerA_, &ArchiveHeader::archiveChanged, this, &ArchiveComparePage::runComparison);
+    connect(headerB_, &ArchiveHeader::archiveChanged, this, &ArchiveComparePage::runComparison);
+    // A drop on a tree belongs to that side's header, which owns the path -
+    // the header then emits archiveChanged and the comparison re-runs, so a
+    // drop on either widget follows exactly one code path.
+    connect(panelA_, &ArchivePanel::archiveDropped, headerA_, &ArchiveHeader::setArchivePathFromDrop);
+    connect(panelB_, &ArchivePanel::archiveDropped, headerB_, &ArchiveHeader::setArchivePathFromDrop);
+
+    connect(onlyChangesCheck_, &QCheckBox::toggled, this, &ArchiveComparePage::applyFilters);
+    connect(typeCombo_, &QComboBox::currentIndexChanged, this, &ArchiveComparePage::applyFilters);
+
     connect(gerberPairList_, &QListWidget::currentRowChanged, this,
             [this](int row) { if (row >= 0) showSelectedPair(); });
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownPair);
@@ -199,49 +285,106 @@ void ArchiveComparePage::runComparison()
 {
     // Cleared unconditionally, before either early return below: a re-pick
     // that turns out empty or unreadable must not leave a previous pair's
-    // stale overlay/layers on screen describing an archive selection that's
-    // since changed.
+    // stale overlay/layers, render/compare times, or classification trees on
+    // screen describing an archive selection that's since changed. The trees
+    // in particular are a claim about a comparison - green means "identical in
+    // both archives" - so stale coloured rows after a failed re-pick would
+    // assert something now false. A successful comparison repopulates them
+    // below, so the only visible effect is on the failure paths.
     shownLayerA_ = Layer{};
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
+    compareTimeLabel_->setText(tr("Compare time: -"));
+    clearSummary();
+    panelA_->showEntries({});
+    panelB_->showEntries({});
+    // Blank, not "no matching files" - nothing has been compared yet, so an
+    // empty-filter-result message would be answering a question the user
+    // hasn't asked.
+    panelA_->showEmptyMessage(QString());
+    panelB_->showEmptyMessage(QString());
 
-    const QString pathA = panelA_->archivePath();
-    const QString pathB = panelB_->archivePath();
+    const QString pathA = headerA_->archivePath();
+    const QString pathB = headerB_->archivePath();
     if (pathA.isEmpty() || pathB.isEmpty()) {
         return; // wait until both archives are picked
     }
 
-    // Each archive is read independently so a failure on one side (FR-008:
-    // corrupt, password-protected, or otherwise unreadable) is reported for
-    // that archive specifically, without crashing and without blocking a
-    // perfectly fine archive on the other side.
-    QVector<ArchiveReader::RawFileEntry> entriesA;
-    bool readA = true;
-    try {
-        entriesA = ArchiveReader::readArchive(pathA);
-    } catch (const ArchiveOpenError &error) {
-        readA = false;
-        QMessageBox::warning(this, tr("Archive A could not be opened"), error.message());
-    }
+    // The whole read-expand-compare pipeline in one call (Q4/Q7). Errors
+    // come back as data, not exceptions: each panel shows its own failure
+    // inline via showError() instead of a modal dialog that would force the
+    // user to dismiss it before seeing which side failed and how the other
+    // side fared.
+    // Not const: resolveKinds fills in each entry's DataKind in place below.
+    ArchiveComparison::Outcome outcome = ArchiveComparison::compareArchives(pathA, pathB);
 
-    QVector<ArchiveReader::RawFileEntry> entriesB;
-    bool readB = true;
-    try {
-        entriesB = ArchiveReader::readArchive(pathB);
-    } catch (const ArchiveOpenError &error) {
-        readB = false;
-        QMessageBox::warning(this, tr("Archive B could not be opened"), error.message());
+    if (!outcome.errorA.isEmpty()) {
+        headerA_->showError(outcome.errorA);
+    } else {
+        headerA_->clearError();
     }
-
-    if (!readA || !readB) {
+    if (!outcome.errorB.isEmpty()) {
+        headerB_->showError(outcome.errorB);
+    } else {
+        headerB_->clearError();
+    }
+    if (!outcome.errorA.isEmpty() || !outcome.errorB.isEmpty()) {
         return; // can't produce a meaningful comparison with one side unreadable
     }
 
-    const ArchiveComparisonResult result = CrcComparator::compare(entriesA, entriesB);
-    panelA_->showEntries(result.entriesA);
-    panelB_->showEntries(result.entriesB);
+    // Each reader only reads the small head its side actually needs
+    // classified - readEntryHead caps the read at kClassifySniffBytes
+    // instead of decompressing the whole entry, which matters because a
+    // real file can run tens of KB and classification only ever looks at
+    // the first few lines. Declared here because both the summary's kind
+    // resolution and the overlay's pair bucketing below use them.
+    const auto readHeadA = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(headerA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
+    const auto readHeadB = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(headerB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
 
-    eligiblePairs_ = GerberDiffTrigger::eligiblePairs(result.differingPairs);
+    // Before showEntries, so the entries the panels receive already carry
+    // their kind. Conclusive extensions cost nothing here; only genuinely
+    // ambiguous files are read (Q8).
+    ComparisonSummary::resolveKinds(outcome.result.entriesA, readHeadA);
+    ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
+
+    const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
+    const QString gerberPart = formatTypeCounts(tr("Gerber"), summary.gerber);
+    const QString otherPart = formatTypeCounts(tr("Other"), summary.other);
+    QStringList summaryParts;
+    if (!gerberPart.isEmpty()) {
+        summaryParts << gerberPart;
+    }
+    if (!otherPart.isEmpty()) {
+        summaryParts << otherPart;
+    }
+    summaryLabel_->setText(summaryParts.join(QStringLiteral("    ")));
+
+    identicalBanner_->setText(tr("No differences - both archives contain the same data."));
+    identicalBanner_->setVisible(summary.fullyIdentical());
+
+    panelA_->showEntries(outcome.result.entriesA);
+    panelB_->showEntries(outcome.result.entriesB);
+    // Re-applied over the fresh entries: the bar keeps its state across a
+    // re-pick, so the trees must honour it immediately rather than showing
+    // everything until the user touches a control.
+    applyFilters();
+    // The pipeline just ran to completion, so - unlike renderTimeLabel_
+    // below - this IS the value to show, not a placeholder: rendering only
+    // happens once the user selects a pair, but the compare itself is
+    // already done.
+    compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs));
+
+    // Content, not extension, decides which pairs the overlay can draw
+    // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
+    // design.md). Reuses the same head readers declared above.
+    const GerberDiffTrigger::PairBuckets buckets =
+        GerberDiffTrigger::classifyPairs(outcome.result.differingPairs, readHeadA, readHeadB);
+
+    eligiblePairs_ = buckets.drawable;
     gerberPairList_->clear();
     for (const auto &pair : eligiblePairs_) {
         gerberPairList_->addItem(formatPairLabel(pair));
@@ -253,75 +396,132 @@ void ArchiveComparePage::runComparison()
     // the Detail card until the user clicks a new pair.
     renderTimeLabel_->setText(tr("Render time: -"));
 
-    const QVector<DifferingPair> unrecognized = GerberDiffTrigger::unrecognizedPairs(result.differingPairs);
-    const QVector<DifferingPair> drill = GerberDiffTrigger::drillPairs(result.differingPairs);
-    rebuildSkippedPairsUi(unrecognized, drill);
+    updateNotDrawableLabel(buckets.notDrawable.size());
 }
 
-void ArchiveComparePage::rebuildSkippedPairsUi(const QVector<DifferingPair> &unrecognized,
-                                               const QVector<DifferingPair> &drill)
+void ArchiveComparePage::clearSummary()
 {
-    // Clear old buttons before rebuilding - runComparison() re-runs on
-    // every archive change, and the previous run's buttons captured the
-    // previous run's lambda state.
-    QLayoutItem *item;
-    while ((item = skippedUnrecognizedButtonRow_->layout()->takeAt(0)) != nullptr) {
-        delete item->widget();
-        delete item;
-    }
-
-    if (unrecognized.isEmpty()) {
-        skippedUnrecognizedLabel_->setVisible(false);
-        skippedUnrecognizedButtonRow_->setVisible(false);
-    } else {
-        // Visibility is driven by `unrecognized`, not the derived
-        // extension list: a skipped pair with no extension on either side
-        // (or one already covered by a just-added extension) yields no
-        // button, but is still genuinely skipped and must not make the
-        // label - the user's only signal something was dropped - disappear.
-        skippedUnrecognizedLabel_->setText(
-            tr("%1 changed pair(s) skipped - unrecognized file extension:").arg(unrecognized.size()));
-        skippedUnrecognizedLabel_->setVisible(true);
-        for (const QString &extension : distinctUnrecognizedExtensions(unrecognized)) {
-            auto *addButton = new QPushButton(tr("Add .%1").arg(extension));
-            connect(addButton, &QPushButton::clicked, this, [this, extension]() {
-                GerberFileType::addUserExtension(extension);
-                runComparison();
-            });
-            skippedUnrecognizedButtonRow_->layout()->addWidget(addButton);
-        }
-        skippedUnrecognizedButtonRow_->setVisible(true);
-    }
-
-    if (drill.isEmpty()) {
-        skippedDrillLabel_->setVisible(false);
-    } else {
-        // No button: these are mixed pairs (one side drill, one side non-drill).
-        // The app can read Excellon drill files (M5 complete), but comparing
-        // a drill file's holes against a copper Gerber layer's traces is
-        // structurally meaningless - nothing the user clicks here would help.
-        skippedDrillLabel_->setText(
-            tr("%1 mixed drill/Gerber pair(s) skipped - drill files cannot be compared with non-drill layers.").arg(drill.size()));
-        skippedDrillLabel_->setVisible(true);
-    }
+    // Both are claims about a completed comparison, so neither may outlive
+    // one. A stale "No differences" banner after a failed re-pick would be
+    // the most misleading thing on the page.
+    summaryLabel_->clear();
+    identicalBanner_->setVisible(false);
 }
 
-// Picks GerberParser or ExcellonParser by the entry's own file extension
-// (GerberFileType::isDrillFile) - see the M5 design doc, section 2. An
-// empty `bytes` (read failure, already handled independently per side by
-// the caller) produces an empty Layer with no error. An ExcellonParser
-// ambiguous-coordinate-format failure is caught here and reported via
-// `parseError` instead of propagating, mirroring how a read failure is
-// already just an empty Layer rather than a thrown exception at this
-// layer - one file's problem must never abort rendering the other side.
-Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, const QString &relativePath,
-                                              QString &parseError)
+void ArchiveComparePage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    updatePanelWidths();
+}
+
+void ArchiveComparePage::updatePanelWidths()
+{
+    // The archive columns used to be a flat 252 px at every window size, so
+    // maximizing handed all of the extra width to the overlay canvas and the
+    // columns' share actually *fell* - from ~46% of a 1100 px window to ~26%
+    // of a 1920 px one. Long archive filenames were therefore hardest to
+    // read exactly when the screen had the most room to spare.
+    //
+    // Two calibration points, interpolated linearly between and extrapolated
+    // beyond: the standard window keeps precisely today's appearance, and a
+    // maximized 1920 px window gives the two columns 40% of its width.
+    constexpr int kStandardWindow = 1100;
+    constexpr int kStandardPanel = 252; // 2 x 252 = ~46% of 1100
+    constexpr int kWideWindow = 1920;
+    constexpr int kWidePanel = 384; // 2 x 384 = 768 = 40% of 1920
+
+    // Measured against the WINDOW, not this page: the page sits beside a
+    // fixed sidebar, so its own width is the same quantity offset by a
+    // constant, and the window is what the 40% is a percentage of.
+    const QWidget *top = window();
+    const int windowWidth = top != nullptr ? top->width() : width();
+
+    constexpr double kGrowthPerPixel =
+        static_cast<double>(kWidePanel - kStandardPanel) / (kWideWindow - kStandardWindow);
+    const int scaled =
+        kStandardPanel + qRound((windowWidth - kStandardWindow) * kGrowthPerPixel);
+
+    // Never narrower than today's standard: a small window should lose space
+    // from the overlay, which can scale, rather than from filenames, which
+    // just get elided.
+    const int panelWidth = qMax(kStandardPanel, scaled);
+
+    headerA_->setFixedWidth(panelWidth);
+    headerB_->setFixedWidth(panelWidth);
+    panelA_->setFixedWidth(panelWidth);
+    panelB_->setFixedWidth(panelWidth);
+}
+
+void ArchiveComparePage::applyFilters()
+{
+    TreeFilter filter;
+    filter.changedOnly = onlyChangesCheck_->isChecked();
+    const int kindValue = typeCombo_->currentData().toInt();
+    if (kindValue >= 0) {
+        filter.kind = static_cast<DataKind>(kindValue);
+    }
+
+    // Both panels, always - one bar means one view of both archives. A bar
+    // that silently applied to only one side would make the two trees
+    // describe different questions.
+    panelA_->setFilter(filter);
+    panelB_->setFilter(filter);
+
+    // Names what was filtered out, rather than a bare "nothing here" - the
+    // user just chose these criteria, so the message should reflect them.
+    QString qualifier;
+    if (filter.changedOnly) {
+        qualifier += tr("changed ");
+    }
+    if (filter.kind == DataKind::GerberData) {
+        qualifier += tr("Gerber ");
+    } else if (filter.kind == DataKind::OtherData) {
+        qualifier += tr("other ");
+    }
+    const QString message = tr("No %1files to show").arg(qualifier);
+
+    panelA_->showEmptyMessage(panelA_->isEmptyAfterFilter() ? message : QString());
+    panelB_->showEmptyMessage(panelB_->isEmptyAfterFilter() ? message : QString());
+}
+
+void ArchiveComparePage::updateNotDrawableLabel(int count)
+{
+    // The mixed drill/Gerber special case and its "Add .<ext>" button are
+    // both gone (Q2/Q12 - see the content-based-drawability design doc):
+    // drawability is content-only now, so there's nothing left for a
+    // button to add, and a drill-vs-Gerber pair is drawable like any other
+    // pair, not a separate rejection reason. What's left is one plain
+    // count of pairs where at least one side didn't classify as drawable.
+    if (count == 0) {
+        notDrawableLabel_->setVisible(false);
+        return;
+    }
+    notDrawableLabel_->setText(
+        tr("%n changed pair(s) can't be previewed - not recognized as Gerber or drill data.", "", count));
+    notDrawableLabel_->setVisible(true);
+}
+
+// Picks GerberParser or ExcellonParser by the entry's own content
+// (GerberFileType::classify) - content-only, no filename involved (Q2/Q12;
+// docs/superpowers/specs/2026-07-27-content-based-drawability-design.md).
+// An empty `bytes` (read failure, already handled independently per side by
+// the caller) produces an empty Layer with no error. A NotDrawable
+// classification also falls through to GerberParser, same as before this
+// change - that parser then finds nothing to draw and layerBoundsMm reports
+// empty bounds, which showSelectedPair already turns into a "no drawable
+// content" status; there is no separate NotDrawable path to wire up here.
+// An ExcellonParser ambiguous-coordinate-format failure is caught here and
+// reported via `parseError` instead of propagating, mirroring how a read
+// failure is already just an empty Layer rather than a thrown exception at
+// this layer - one file's problem must never abort rendering the other
+// side.
+Layer ArchiveComparePage::parseGerberOrDrill(const QByteArray &bytes, QString &parseError)
 {
     if (bytes.isEmpty()) {
         return Layer{};
     }
     const QString content = QString::fromUtf8(bytes);
-    if (!GerberFileType::isDrillFile(relativePath, bytes)) {
+    if (GerberFileType::classify(bytes) != GerberFileType::Drawability::ExcellonDrill) {
         return GerberParser::parseContentToObjects(content);
     }
     try {
@@ -340,13 +540,15 @@ void ArchiveComparePage::showSelectedPair()
     }
     const DifferingPair &pair = eligiblePairs_.at(row);
 
-    const QByteArray bytesA = ArchiveReader::readEntryBytes(panelA_->archivePath(), pair.relativePathA);
-    const QByteArray bytesB = ArchiveReader::readEntryBytes(panelB_->archivePath(), pair.relativePathB);
+    bool foundA = false;
+    bool foundB = false;
+    const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
+    const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
 
     QString parseErrorA;
     QString parseErrorB;
-    shownLayerA_ = parseGerberOrDrill(bytesA, pair.relativePathA, parseErrorA);
-    shownLayerB_ = parseGerberOrDrill(bytesB, pair.relativePathB, parseErrorB);
+    shownLayerA_ = parseGerberOrDrill(bytesA, parseErrorA);
+    shownLayerB_ = parseGerberOrDrill(bytesB, parseErrorB);
 
     // Each side is judged independently: an empty-but-readable file, a read
     // failure, or a parse failure (parseErrorX set) all leave that side's
@@ -357,18 +559,33 @@ void ArchiveComparePage::showSelectedPair()
     const QRectF boundsB = GerberObjectPaths::layerBoundsMm(shownLayerB_);
     const QRectF unitedBounds = boundsA.united(boundsB);
 
-    if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
+    // A read failure (found == false) is checked before parse errors and
+    // before the "no drawable content" bounds checks below: parseGerberOrDrill
+    // returns an empty Layer with no parseError for empty bytes (its own
+    // comment says as much), so a read failure would otherwise silently fall
+    // through to "Neither side has drawable content" - blaming the file's
+    // content when the file was never actually read. That message must stay
+    // reserved for a file that WAS read and parsed to nothing.
+    if (!foundA) {
+        pairStatusLabel_->setText(
+            tr("Could not read \"%1\" from archive %2.")
+                .arg(pair.relativePathA, QFileInfo(headerA_->archivePath()).fileName()));
+    } else if (!foundB) {
+        pairStatusLabel_->setText(
+            tr("Could not read \"%1\" from archive %2.")
+                .arg(pair.relativePathB, QFileInfo(headerB_->archivePath()).fileName()));
+    } else if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
         pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2.").arg(parseErrorA, parseErrorB));
     } else if (!parseErrorA.isEmpty()) {
-        pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing old file only.").arg(parseErrorA));
+        pairStatusLabel_->setText(tr("A side failed to parse: %1 - showing B only.").arg(parseErrorA));
     } else if (!parseErrorB.isEmpty()) {
-        pairStatusLabel_->setText(tr("B side failed to parse: %1 - showing new file only.").arg(parseErrorB));
+        pairStatusLabel_->setText(tr("B side failed to parse: %1 - showing A only.").arg(parseErrorB));
     } else if (unitedBounds.isEmpty()) {
         pairStatusLabel_->setText(tr("Neither side has drawable content."));
     } else if (boundsA.isEmpty()) {
-        pairStatusLabel_->setText(tr("A side: no drawable content - showing old file only."));
+        pairStatusLabel_->setText(tr("A side: no drawable content - showing B only."));
     } else if (boundsB.isEmpty()) {
-        pairStatusLabel_->setText(tr("B side: no drawable content - showing new file only."));
+        pairStatusLabel_->setText(tr("B side: no drawable content - showing A only."));
     } else {
         pairStatusLabel_->clear();
     }

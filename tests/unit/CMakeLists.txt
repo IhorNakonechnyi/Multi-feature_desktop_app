@@ -17,6 +17,16 @@ target_include_directories(test_archivereader PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivereader PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
 add_test(NAME test_archivereader COMMAND test_archivereader)
 
+add_executable(test_archivecomparison
+    test_archivecomparison.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivecomparison.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/crccomparator.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/archivereader.cpp
+)
+target_include_directories(test_archivecomparison PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivecomparison PRIVATE Qt6::Core Qt6::Test QuaZip::QuaZip)
+add_test(NAME test_archivecomparison COMMAND test_archivecomparison)
+
 add_executable(test_archivetreemodel
     test_archivetreemodel.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/archivetreemodel.cpp
@@ -24,6 +34,23 @@ add_executable(test_archivetreemodel
 target_include_directories(test_archivetreemodel PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivetreemodel PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
 add_test(NAME test_archivetreemodel COMMAND test_archivetreemodel)
+
+add_executable(test_comparisonsummary
+    test_comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp # kind sniffing (Task 15)
+)
+target_include_directories(test_comparisonsummary PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_comparisonsummary PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME test_comparisonsummary COMMAND test_comparisonsummary)
+
+# Header-only helper, so no .cpp of its own to compile in.
+add_executable(test_archivedroputil
+    test_archivedroputil.cpp
+)
+target_include_directories(test_archivedroputil PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivedroputil PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME test_archivedroputil COMMAND test_archivedroputil)
 
 add_executable(test_gerberdifftrigger
     test_gerberdifftrigger.cpp

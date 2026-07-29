@@ -26,6 +26,7 @@ private slots:
     void counterClockwiseArcSlotSetsCounterClockwiseFlag();
     void modalCoordinateAfterG01ReusesLinearMode();
     void drillHoleStillWorksAfterG05ReturnsToDrillMode();
+    void toolDiameterFoundAfterFeedAndSpeedModifiers();
 };
 
 void TestExcellonParser::explicitDecimalHoleProducesFlashAtRightPosition()
@@ -428,6 +429,43 @@ void TestExcellonParser::drillHoleStillWorksAfterG05ReturnsToDrillMode()
     QCOMPARE(layer.objects.size(), 2);
     QCOMPARE(static_cast<int>(layer.objects[1].type), static_cast<int>(ObjectType::Flash));
     QCOMPARE(layer.objects[1].position.x, GerberFormat::mmToNm(9.0));
+}
+
+void TestExcellonParser::toolDiameterFoundAfterFeedAndSpeedModifiers()
+{
+    // A tool definition may carry optional feed (F) and spindle-speed (S)
+    // modifiers, in any order, before the diameter - so C has to be searched
+    // for among the line's fields, not assumed to follow the tool number.
+    //
+    // Taken from a real supplier drill file (TARGET 3001! export). Reading
+    // only the position right after the tool number left the tool with no
+    // diameter, so its holes had no aperture and the layer drew nothing at
+    // all while still reporting the right number of objects.
+    const QString content =
+        "M48\n"
+        "METRIC\n"
+        "T1F00S00C0.200\n"
+        "T2F00S00C0.300\n"
+        "%\n"
+        "T1\n"
+        "X1.000Y2.000\n"
+        "T2\n"
+        "X3.000Y4.000\n"
+        "M30\n";
+
+    const Layer layer = ExcellonParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.apertures.size(), 2);
+    QVERIFY(layer.apertures.contains(1));
+    QVERIFY(layer.apertures.contains(2));
+    QVERIFY(qFuzzyCompare(layer.apertures.value(1).modifiers[0], 0.200));
+    QVERIFY(qFuzzyCompare(layer.apertures.value(2).modifiers[0], 0.300));
+
+    // The holes must still land on the right tools - F/S must not be
+    // mistaken for the diameter field.
+    QCOMPARE(layer.objects.size(), 2);
+    QCOMPARE(layer.objects[0].apertureCode, 1);
+    QCOMPARE(layer.objects[1].apertureCode, 2);
 }
 
 QTEST_MAIN(TestExcellonParser)

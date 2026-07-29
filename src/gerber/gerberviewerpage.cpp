@@ -65,11 +65,11 @@ void GerberViewerPage::openFile()
     const QByteArray bytes = file.readAll();
     const QString content = QString::fromUtf8(bytes);
 
-    // Dispatch by extension (or, for an ambiguous extension, by sniffing
-    // content for an Excellon header), same rule as ArchiveComparePage::
-    // parseGerberOrDrill - a drill file needs ExcellonParser, not
-    // GerberParser, which doesn't speak Excellon syntax at all.
-    if (GerberFileType::isDrillFile(filePath, bytes)) {
+    // Dispatch by content (Q2/Q12 - the filename plays no part), same rule
+    // as ArchiveComparePage::parseGerberOrDrill - a drill file needs
+    // ExcellonParser, not GerberParser, which doesn't speak Excellon syntax
+    // at all.
+    if (GerberFileType::classify(bytes) == GerberFileType::Drawability::ExcellonDrill) {
         try {
             layer_ = ExcellonParser::parseContentToObjects(content);
         } catch (const ExcellonParser::AmbiguousFormatError &error) {

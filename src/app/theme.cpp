@@ -28,7 +28,12 @@ QString themeStylesheet()
     rules << QString("ArchiveComparePage { background: %1; }").arg(Palette::FrameBackground);
     rules << QString("QLabel#pageTitle { color: %1; font-size: 15px; font-weight: 700; }")
                  .arg(Palette::SidebarTitleText);
-    rules << QString("ArchivePanel { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
+    // Header and tree are separate widgets since the Q8 split (the filter bar
+    // sits between them), so both need the card treatment - otherwise the
+    // header floats on the page background and the 1b "Elevated Panels" look
+    // survives on only half of each side.
+    rules << QString("ArchivePanel, ArchiveHeader { background: %1; border-radius: 8px; }")
+                 .arg(Palette::CardBackground);
     rules << QString("#treeCardHeader { border-bottom: 1px solid %1; }").arg(Palette::CardHeaderBorder);
     rules << QString("#pairsCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("QListWidget#pairsList { background: transparent; border: none; outline: none; }");
@@ -40,6 +45,12 @@ QString themeStylesheet()
     rules << QString("#canvasCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("#detailCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("QLabel#detailLabel { color: %1; font-size: 12px; }").arg(Palette::DetailText);
+    // The "nothing differs" banner. Uses the same green as an identical row
+    // so the page says one thing in one colour, and is padded into a band
+    // rather than left as loose text - it is a conclusion, not a detail.
+    rules << QString("QLabel#identicalBanner { background: %1; color: %2; font-size: 12px; "
+                     "padding: 8px 10px; border-radius: 6px; }")
+                 .arg(Palette::SameBackground, Palette::SameForeground);
 
     return rules.join('\n');
 }
