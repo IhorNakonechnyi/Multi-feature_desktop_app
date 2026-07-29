@@ -27,11 +27,13 @@ std::map<ClassKey, ClassInfo> indexByClass(const QVector<ArchiveEntry> &entries)
     for (const ArchiveEntry &entry : entries) {
         ClassInfo &info = classes[ClassKey(entry.crc32, entry.sizeBytes)];
 
-        // "any" rather than "the representative row" - all rows of one
-        // content class inside one archive are the same bytes, so they
-        // necessarily match or fail to match together and already share a
-        // classification. Taking any of them avoids having to re-derive
-        // which row Q1 picked as representative.
+        // "any" rather than "the representative row", and the two are
+        // equivalent here: CrcComparator forces every NON-representative
+        // member of a class to plain Identical unconditionally (see its
+        // step 2), so the representative is the only member that can ever
+        // carry OnlyInThisArchive. ORing over all members therefore reduces
+        // to reading the representative, without this code having to
+        // re-derive which row Q1 picked as one.
         info.anyGerber = info.anyGerber || entry.kind == DataKind::GerberData;
         info.anyMissingCounterpart = info.anyMissingCounterpart
                                      || entry.classification == EntryClassification::OnlyInThisArchive;

@@ -134,6 +134,12 @@ void TestArchiveDropUtil::rejectsNonLocalUrl()
 {
     // A zip dragged out of a browser is a remote URL: the name would pass
     // but there is no local path to open.
+    //
+    // Documented weakness: this case cannot currently fail. Removing the
+    // isLocalFile() check entirely leaves it passing, because toLocalFile()
+    // already returns an empty string for a remote URL and the .zip check
+    // rejects that independently. Kept as a statement of intent and a guard
+    // for the day the later checks change - not as proof of anything.
     QMimeData mime;
     mime.setUrls({ QUrl(QStringLiteral("https://example.invalid/gerbers.zip")) });
     QVERIFY(singleDroppedZipPath(&mime).isEmpty());
@@ -141,6 +147,9 @@ void TestArchiveDropUtil::rejectsNonLocalUrl()
 
 void TestArchiveDropUtil::rejectsEmptyDrop()
 {
+    // Load-bearing despite looking trivial: it is what stops the count
+    // guard from being loosened to `urls.size() > 1`, which would let an
+    // empty drop reach urls.first() and trip QList's !isEmpty() assert.
     QMimeData mime; // e.g. dragged text, which carries no urls at all
     QVERIFY(singleDroppedZipPath(&mime).isEmpty());
 }

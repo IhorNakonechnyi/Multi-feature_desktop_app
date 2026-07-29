@@ -21,6 +21,7 @@ private slots:
     void kindsSplitGerberVsOther();
     void fullyIdenticalDetected();
     void yellowClassIsNotToCheck();
+    void onlyRepresentativeCarriesTheClassification();
 };
 
 namespace {
@@ -157,6 +158,29 @@ void TestComparisonSummary::yellowClassIsNotToCheck()
     QCOMPARE(summary.other.onlyInA, 0);
     QCOMPARE(summary.other.onlyInB, 0);
     QCOMPARE(summary.other.pairs, 1);
+}
+
+void TestComparisonSummary::onlyRepresentativeCarriesTheClassification()
+{
+    // The shape real CrcComparator output actually takes, and the reason
+    // summarize() may reduce a class with "any member" instead of having to
+    // re-derive which row is the representative: the comparator forces every
+    // NON-representative member of a class to plain Identical, so a red
+    // class looks like one red row plus green ones. Rows of a class do NOT
+    // all share a classification - only the representative carries it.
+    //
+    // If summarize() ever switched to "all members" or "the first member in
+    // iteration order", this class would silently stop counting as missing.
+    ArchiveComparisonResult result;
+    result.entriesA = {
+        entry("deep/nested/copy.txt", 0x77, 100, EntryClassification::Identical),
+        entry("shallow.txt", 0x77, 100, EntryClassification::OnlyInThisArchive), // representative
+        entry("another/copy.txt", 0x77, 100, EntryClassification::Identical),
+    };
+
+    const auto summary = ComparisonSummary::summarize(result);
+    QCOMPARE(summary.other.onlyInA, 1);
+    QCOMPARE(summary.other.identicalClasses, 0); // one-sided, so not identical
 }
 
 QTEST_MAIN(TestComparisonSummary)

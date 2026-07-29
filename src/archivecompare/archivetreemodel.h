@@ -19,7 +19,9 @@
 struct ArchiveTreeNode {
     QString name;
     bool isDirectory = false;
-    quint64 sizeBytes = 0;
+    // No sizeBytes here on purpose: Q9 dropped size from both the display
+    // and the sort, so the tree has no use for it. ArchiveEntry still
+    // carries it, since it is half of the (crc32, size) content-class key.
     EntryClassification classification = EntryClassification::Identical; // unused for directories
     int sortBand = 2; // 0 yellow, 1 red, 2 green - work-demanded order (Q9).
                       // Directories inherit the LOWEST (highest-priority)

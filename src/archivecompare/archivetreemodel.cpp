@@ -45,7 +45,6 @@ void ArchiveTreeModel::buildFrom(const QVector<ArchiveEntry> &entries)
             }
 
             if (isLastSegment) {
-                child->sizeBytes = entry.sizeBytes;
                 child->classification = entry.classification;
             }
             current = child;
