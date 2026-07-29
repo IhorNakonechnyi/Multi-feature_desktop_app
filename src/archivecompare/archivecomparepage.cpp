@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QResizeEvent>
 #include <QStringList>
 #include <QVBoxLayout>
 
@@ -158,14 +159,13 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *archiveGrid = new QGridLayout;
     archiveGrid->setSpacing(8);
 
+    // Widths are not fixed here - updatePanelWidths() sets them from the
+    // window size (see resizeEvent).
     headerA_ = new ArchiveHeader(tr("A"));
-    headerA_->setFixedWidth(252); // +20% over the original 210px
     headerB_ = new ArchiveHeader(tr("B"));
-    headerB_->setFixedWidth(252);
     panelA_ = new ArchivePanel;
-    panelA_->setFixedWidth(252);
     panelB_ = new ArchivePanel;
-    panelB_->setFixedWidth(252);
+    updatePanelWidths();
 
     auto *controlBar = new QWidget;
     auto *controlBarLayout = new QHBoxLayout(controlBar);
@@ -406,6 +406,50 @@ void ArchiveComparePage::clearSummary()
     // the most misleading thing on the page.
     summaryLabel_->clear();
     identicalBanner_->setVisible(false);
+}
+
+void ArchiveComparePage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    updatePanelWidths();
+}
+
+void ArchiveComparePage::updatePanelWidths()
+{
+    // The archive columns used to be a flat 252 px at every window size, so
+    // maximizing handed all of the extra width to the overlay canvas and the
+    // columns' share actually *fell* - from ~46% of a 1100 px window to ~26%
+    // of a 1920 px one. Long archive filenames were therefore hardest to
+    // read exactly when the screen had the most room to spare.
+    //
+    // Two calibration points, interpolated linearly between and extrapolated
+    // beyond: the standard window keeps precisely today's appearance, and a
+    // maximized 1920 px window gives the two columns 40% of its width.
+    constexpr int kStandardWindow = 1100;
+    constexpr int kStandardPanel = 252; // 2 x 252 = ~46% of 1100
+    constexpr int kWideWindow = 1920;
+    constexpr int kWidePanel = 384; // 2 x 384 = 768 = 40% of 1920
+
+    // Measured against the WINDOW, not this page: the page sits beside a
+    // fixed sidebar, so its own width is the same quantity offset by a
+    // constant, and the window is what the 40% is a percentage of.
+    const QWidget *top = window();
+    const int windowWidth = top != nullptr ? top->width() : width();
+
+    constexpr double kGrowthPerPixel =
+        static_cast<double>(kWidePanel - kStandardPanel) / (kWideWindow - kStandardWindow);
+    const int scaled =
+        kStandardPanel + qRound((windowWidth - kStandardWindow) * kGrowthPerPixel);
+
+    // Never narrower than today's standard: a small window should lose space
+    // from the overlay, which can scale, rather than from filenames, which
+    // just get elided.
+    const int panelWidth = qMax(kStandardPanel, scaled);
+
+    headerA_->setFixedWidth(panelWidth);
+    headerB_->setFixedWidth(panelWidth);
+    panelA_->setFixedWidth(panelWidth);
+    panelB_->setFixedWidth(panelWidth);
 }
 
 void ArchiveComparePage::applyFilters()

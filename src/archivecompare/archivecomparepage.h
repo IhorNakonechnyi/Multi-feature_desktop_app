@@ -30,10 +30,17 @@ class ArchiveComparePage : public QWidget {
 public:
     explicit ArchiveComparePage(QWidget *parent = nullptr);
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
     void runComparison();
     void clearSummary();
     void applyFilters();
+
+    // Widens the archive columns as the window grows, so a long filename has
+    // more room exactly when there is room to give it.
+    void updatePanelWidths();
     void updateNotDrawableLabel(int count);
     void showSelectedPair();
     void renderShownPair(const QRectF &windowMm, double pxPerMm);
