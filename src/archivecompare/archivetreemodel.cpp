@@ -52,21 +52,58 @@ void ArchiveTreeModel::buildFrom(const QVector<ArchiveEntry> &entries)
         }
     }
 
+    assignBands(root_.get());
     sortChildren(root_.get());
     endResetModel();
+}
+
+int ArchiveTreeModel::assignBands(ArchiveTreeNode *node)
+{
+    // Written as an explicit switch rather than a cast of the enum, so the
+    // band order stays independent of the order the enumerators happen to
+    // be declared in.
+    auto bandForFile = [](EntryClassification classification) {
+        switch (classification) {
+        case EntryClassification::Different:
+            return 0; // yellow - the app assumed these correspond and they differ
+        case EntryClassification::OnlyInThisArchive:
+            return 1; // red - no counterpart, check it
+        case EntryClassification::Identical:
+            return 2; // green - nothing to do
+        }
+        return 2;
+    };
+
+    if (!node->isDirectory) {
+        node->sortBand = bandForFile(node->classification);
+        return node->sortBand;
+    }
+
+    // A directory takes the most urgent band found anywhere below it. The
+    // recursion runs over every child first (no early exit on finding a 0)
+    // because each child still needs its own band filled in for the view.
+    int band = 2;
+    for (auto &child : node->children) {
+        band = std::min(band, assignBands(child.get()));
+    }
+    node->sortBand = band;
+    return band;
 }
 
 void ArchiveTreeModel::sortChildren(ArchiveTreeNode *node)
 {
     std::sort(node->children.begin(), node->children.end(),
               [](const std::unique_ptr<ArchiveTreeNode> &a, const std::unique_ptr<ArchiveTreeNode> &b) {
+                  if (a->sortBand != b->sortBand) {
+                      return a->sortBand < b->sortBand; // yellow, then red, then green
+                  }
                   if (a->isDirectory != b->isDirectory) {
-                      return a->isDirectory; // directories first
+                      return a->isDirectory; // directories first within a band
                   }
-                  if (a->isDirectory) {
-                      return a->name < b->name; // directories: name ascending
-                  }
-                  return a->sizeBytes < b->sizeBytes; // files: size ascending
+                  // Case-insensitive: an archive mixing "Gerber/" and
+                  // "gerber/" style names should read alphabetically to a
+                  // person, not group all capitals ahead of all lowercase.
+                  return a->name.compare(b->name, Qt::CaseInsensitive) < 0;
               });
 
     for (auto &child : node->children) {
@@ -124,7 +161,8 @@ int ArchiveTreeModel::rowCount(const QModelIndex &parent) const
 
 int ArchiveTreeModel::columnCount(const QModelIndex &) const
 {
-    return 1; // single column - size is shown inline by the delegate, not a real column
+    return 1; // single column - the row shows the filename and nothing else;
+              // size is internal plumbing (Q9)
 }
 
 QVariant ArchiveTreeModel::data(const QModelIndex &index, int role) const
@@ -144,6 +182,8 @@ QVariant ArchiveTreeModel::data(const QModelIndex &index, int role) const
         return QVariant::fromValue(node->classification);
     case IsDirectoryRole:
         return node->isDirectory;
+    case SortBandRole:
+        return node->sortBand;
     default:
         return {};
     }

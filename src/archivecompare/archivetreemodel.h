@@ -9,14 +9,21 @@
 
 // Backing node for ArchiveTreeModel. Folders are purely structural,
 // inferred from splitting each entry's relativePath on '/' - only file
-// leaves carry a classification/color. The spec only asks for per-file
-// coloring, so folders deliberately don't get a rollup color of their own
-// (constitution Principle 1: don't invent a rule the spec never asked for).
+// leaves carry a classification of their own.
+//
+// Folders used to be left uncoloured on the grounds that the spec only
+// asked for per-file colouring. Q9 reverses that: a folder now inherits
+// the highest-priority band of its descendants and is tinted accordingly,
+// because a collapsed folder that hides a changed file otherwise looks
+// like there is nothing to do inside it.
 struct ArchiveTreeNode {
     QString name;
     bool isDirectory = false;
     quint64 sizeBytes = 0;
     EntryClassification classification = EntryClassification::Identical; // unused for directories
+    int sortBand = 2; // 0 yellow, 1 red, 2 green - work-demanded order (Q9).
+                      // Directories inherit the LOWEST (highest-priority)
+                      // band of their descendants.
     std::vector<std::unique_ptr<ArchiveTreeNode>> children;
     ArchiveTreeNode *parent = nullptr;
 };
@@ -32,6 +39,7 @@ public:
     enum Role {
         ClassificationRole = Qt::UserRole + 1,
         IsDirectoryRole,
+        SortBandRole,
     };
 
     explicit ArchiveTreeModel(QObject *parent = nullptr);
@@ -49,9 +57,15 @@ public:
 private:
     std::unique_ptr<ArchiveTreeNode> root_;
 
+    // Fills in sortBand for the whole subtree and returns `node`'s own
+    // band, so a directory can be scored from its children in the same
+    // single bottom-up pass. Must run before sortChildren, which sorts on
+    // the result.
+    static int assignBands(ArchiveTreeNode *node);
+
     // Sort rule applied once at build time, not via QTreeView's
-    // click-to-sort headers - a fixed deterministic order (folders first,
-    // then alphabetical/by size) is what's wanted here, not a
-    // user-toggleable one.
+    // click-to-sort headers - a fixed deterministic order is what's wanted
+    // here, not a user-toggleable one. Key: band, then directories before
+    // files, then case-insensitive name (Q9).
     static void sortChildren(ArchiveTreeNode *node);
 };
