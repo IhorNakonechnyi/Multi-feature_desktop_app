@@ -89,33 +89,6 @@ QString formatPairLabel(const DifferingPair &pair)
     return label;
 }
 
-// One kind's fragment of the summary line, e.g. "Gerber: 9 identical - 2
-// pairs - A: 1 to check". Identical and pairs are global facts about the
-// comparison; "to check" is per panel, because a missing file exists on one
-// side only by definition. Zero-valued fragments are dropped rather than
-// printed as "0", so the line stays short enough to read at a glance - and
-// an empty kind contributes nothing at all.
-QString formatTypeCounts(const QString &label, const ComparisonSummary::TypeCounts &counts)
-{
-    QStringList parts;
-    if (counts.identicalClasses > 0) {
-        parts << QObject::tr("%n identical", "", counts.identicalClasses);
-    }
-    if (counts.pairs > 0) {
-        parts << QObject::tr("%n pair(s)", "", counts.pairs);
-    }
-    if (counts.onlyInA > 0) {
-        parts << QObject::tr("A: %n to check", "", counts.onlyInA);
-    }
-    if (counts.onlyInB > 0) {
-        parts << QObject::tr("B: %n to check", "", counts.onlyInB);
-    }
-    if (parts.isEmpty()) {
-        return {};
-    }
-    return QObject::tr("%1: %2").arg(label, parts.join(QStringLiteral(" · ")));
-}
-
 } // namespace
 
 ArchiveComparePage::ArchiveComparePage(QWidget *parent)
@@ -352,16 +325,7 @@ void ArchiveComparePage::runComparison()
     ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
 
     const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
-    const QString gerberPart = formatTypeCounts(tr("Gerber"), summary.gerber);
-    const QString otherPart = formatTypeCounts(tr("Other"), summary.other);
-    QStringList summaryParts;
-    if (!gerberPart.isEmpty()) {
-        summaryParts << gerberPart;
-    }
-    if (!otherPart.isEmpty()) {
-        summaryParts << otherPart;
-    }
-    summaryLabel_->setText(summaryParts.join(QStringLiteral("    ")));
+    summaryLabel_->setText(ComparisonSummary::formatSummaryLine(summary));
 
     identicalBanner_->setText(tr("No differences - both archives contain the same data."));
     identicalBanner_->setVisible(summary.fullyIdentical());
@@ -433,8 +397,11 @@ void ArchiveComparePage::updatePanelWidths()
     // Measured against the WINDOW, not this page: the page sits beside a
     // fixed sidebar, so its own width is the same quantity offset by a
     // constant, and the window is what the 40% is a percentage of.
-    const QWidget *top = window();
-    const int windowWidth = top != nullptr ? top->width() : width();
+    //
+    // QWidget::window() never returns null - during construction, before this
+    // page is reparented into the shell, it returns `this` with a small
+    // default width, which the floor below turns into the standard width.
+    const int windowWidth = window()->width();
 
     constexpr double kGrowthPerPixel =
         static_cast<double>(kWidePanel - kStandardPanel) / (kWideWindow - kStandardWindow);
@@ -467,19 +434,7 @@ void ArchiveComparePage::applyFilters()
     panelA_->setFilter(filter);
     panelB_->setFilter(filter);
 
-    // Names what was filtered out, rather than a bare "nothing here" - the
-    // user just chose these criteria, so the message should reflect them.
-    QString qualifier;
-    if (filter.changedOnly) {
-        qualifier += tr("changed ");
-    }
-    if (filter.kind == DataKind::GerberData) {
-        qualifier += tr("Gerber ");
-    } else if (filter.kind == DataKind::OtherData) {
-        qualifier += tr("other ");
-    }
-    const QString message = tr("No %1files to show").arg(qualifier);
-
+    const QString message = emptyAfterFilterMessage(filter);
     panelA_->showEmptyMessage(panelA_->isEmptyAfterFilter() ? message : QString());
     panelB_->showEmptyMessage(panelB_->isEmptyAfterFilter() ? message : QString());
 }

@@ -17,6 +17,11 @@ struct TreeFilter {
     std::optional<DataKind> kind; // nullopt = every kind
 };
 
+// What a panel says when this filter leaves it with nothing, e.g.
+// "No changed Gerber files to show". Names the criteria the user just chose
+// rather than a bare "nothing here", so an empty pane doesn't read as a bug.
+QString emptyAfterFilterMessage(const TreeFilter &filter);
+
 // Backing node for ArchiveTreeModel. Folders are purely structural,
 // inferred from splitting each entry's relativePath on '/' - only file
 // leaves carry a classification of their own.

@@ -27,6 +27,13 @@ private slots:
     void yellowClassIsNotToCheck();
     void onlyRepresentativeCarriesTheClassification();
 
+    void classKindPrefersGerberWhenSidesDisagree();
+
+    void formatDropsZeroValuedFragments();
+    void formatLabelsToCheckPerSide();
+    void formatOmitsAKindWithNothingToReport();
+    void formatJoinsBothKinds();
+
     void conclusiveGerberExtensionNotRead();
     void conclusiveOtherExtensionNotRead();
     void txtIsSniffed();
@@ -191,6 +198,90 @@ void TestComparisonSummary::onlyRepresentativeCarriesTheClassification()
     const auto summary = ComparisonSummary::summarize(result);
     QCOMPARE(summary.other.onlyInA, 1);
     QCOMPARE(summary.other.identicalClasses, 0); // one-sided, so not identical
+}
+
+void TestComparisonSummary::classKindPrefersGerberWhenSidesDisagree()
+{
+    // The two sides can only disagree about a class's kind through a sniff
+    // edge case, but when they do the class must count as Gerber - otherwise
+    // the summary would file it under Other while the pair list, which asks
+    // either endpoint, still treats it as previewable.
+    ArchiveComparisonResult result;
+    result.entriesA = { entry("ambiguous.txt", 0x88, 120, EntryClassification::Identical,
+                              DataKind::OtherData) };
+    result.entriesB = { entry("ambiguous.txt", 0x88, 120, EntryClassification::Identical,
+                              DataKind::GerberData) };
+
+    const auto summary = ComparisonSummary::summarize(result);
+    QCOMPARE(summary.gerber.identicalClasses, 1);
+    QCOMPARE(summary.other.identicalClasses, 0);
+}
+
+// --- Summary line formatting ---------------------------------------------
+//
+// This is what turns correct counts into the sentence the user reads as "the
+// state of the comparison", so a swapped label or a dropped fragment would
+// misreport the work with nothing else to catch it.
+
+void TestComparisonSummary::formatDropsZeroValuedFragments()
+{
+    ComparisonSummary::TypeCounts counts;
+    counts.identicalClasses = 9;
+    counts.pairs = 0; // must not appear at all, not as "0 pairs"
+    counts.onlyInA = 2;
+
+    const QString line = ComparisonSummary::formatTypeCounts(QStringLiteral("Gerber"), counts);
+
+    QVERIFY(line.contains(QStringLiteral("9 identical")));
+    QVERIFY2(!line.contains(QStringLiteral("0")), qPrintable(line));
+    QVERIFY(!line.contains(QStringLiteral("pair")));
+}
+
+void TestComparisonSummary::formatLabelsToCheckPerSide()
+{
+    // "to check" is per panel - A's missing files and B's are different
+    // facts, so the labels must not be interchangeable.
+    ComparisonSummary::TypeCounts onlyA;
+    onlyA.onlyInA = 3;
+    ComparisonSummary::TypeCounts onlyB;
+    onlyB.onlyInB = 3;
+
+    const QString aLine = ComparisonSummary::formatTypeCounts(QStringLiteral("Other"), onlyA);
+    const QString bLine = ComparisonSummary::formatTypeCounts(QStringLiteral("Other"), onlyB);
+
+    QVERIFY2(aLine.contains(QStringLiteral("A: 3")), qPrintable(aLine));
+    QVERIFY(!aLine.contains(QStringLiteral("B:")));
+    QVERIFY2(bLine.contains(QStringLiteral("B: 3")), qPrintable(bLine));
+    QVERIFY(!bLine.contains(QStringLiteral("A:")));
+}
+
+void TestComparisonSummary::formatOmitsAKindWithNothingToReport()
+{
+    // An archive pair with no "other" files at all should not read
+    // "... Other:" with an empty tail.
+    ComparisonSummary::Summary summary;
+    summary.gerber.identicalClasses = 4;
+
+    const QString line = ComparisonSummary::formatSummaryLine(summary);
+
+    QVERIFY2(line.contains(QStringLiteral("Gerber")), qPrintable(line));
+    QVERIFY2(!line.contains(QStringLiteral("Other")), qPrintable(line));
+    QCOMPARE(line.trimmed(), line); // no dangling separator
+}
+
+void TestComparisonSummary::formatJoinsBothKinds()
+{
+    ComparisonSummary::Summary summary;
+    summary.gerber.identicalClasses = 16;
+    summary.gerber.pairs = 1;
+    summary.other.identicalClasses = 8;
+
+    const QString line = ComparisonSummary::formatSummaryLine(summary);
+
+    QVERIFY2(line.contains(QStringLiteral("Gerber")), qPrintable(line));
+    QVERIFY2(line.contains(QStringLiteral("Other")), qPrintable(line));
+    QVERIFY2(line.indexOf(QStringLiteral("Gerber")) < line.indexOf(QStringLiteral("Other")),
+             "Gerber - the previewable kind - leads the line");
 }
 
 // --- Task 15: kind resolution -------------------------------------------

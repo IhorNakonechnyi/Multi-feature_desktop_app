@@ -3,6 +3,7 @@
 #include <functional>
 
 #include <QByteArray>
+#include <QString>
 
 #include "archivecomparisonresult.h"
 
@@ -57,5 +58,17 @@ void resolveKinds(QVector<ArchiveEntry> &entries, const HeadReader &readHead);
 // the fixed truth the filters are applied against, so it must not move when
 // the user hides rows. Entries' `kind` fields must already be resolved.
 Summary summarize(const ArchiveComparisonResult &result);
+
+// One kind's fragment, e.g. "Gerber: 9 identical - 2 pairs - A: 1 to check".
+// Empty when the kind has nothing to report, so an absent kind contributes
+// nothing to the line rather than a row of zeros.
+//
+// Lives here rather than in the page because it is pure logic that decides
+// what numbers the user reads: a swapped A/B label or a dropped fragment
+// would misreport the work with nothing to catch it.
+QString formatTypeCounts(const QString &label, const TypeCounts &counts);
+
+// The whole summary line, both kinds joined.
+QString formatSummaryLine(const Summary &summary);
 
 } // namespace ComparisonSummary

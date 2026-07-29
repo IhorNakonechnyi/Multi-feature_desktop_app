@@ -16,9 +16,17 @@ class QLabel;
 class QListWidget;
 class QWidget;
 
-// v1.0's feature page: two side-by-side ArchivePanels, re-compared
-// automatically whenever either archive changes. Also hosts the Gerber
-// overlay-compare area in the page's right-hand column (M4, see
+// The Archive Compare feature page, re-compared automatically whenever
+// either archive changes.
+//
+// Left column is a grid (Q8): the two ArchiveHeaders on top, one filter bar
+// spanning both beneath them, and the two ArchivePanel trees below that - the
+// bar spans because it acts on both sides, which it could not express from
+// inside either one. Above the grid sit the summary line and the
+// nothing-differs banner, full width so they describe both sides at once.
+//
+// Also hosts the Gerber overlay-compare area in the page's right-hand
+// column (M4, see
 // docs/superpowers/specs/2026-07-18-gerber-render-v2-m4-overlay-design.md):
 // every changed Gerber pair between the two archives is listed; selecting
 // one renders both revisions in one CompositeView, additively tinted (A =

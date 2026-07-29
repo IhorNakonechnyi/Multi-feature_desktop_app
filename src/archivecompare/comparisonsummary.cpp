@@ -5,7 +5,9 @@
 
 #include <QFileInfo>
 #include <QHash>
+#include <QObject>
 #include <QSet>
+#include <QStringList>
 
 #include "../gerber/gerberfiletype.h"
 
@@ -118,6 +120,45 @@ bool Summary::fullyIdentical() const
     // Deliberately says nothing about identicalClasses: two empty archives
     // are identical, and so are two archives whose every class matches.
     return nothingToDo(gerber) && nothingToDo(other);
+}
+
+QString formatTypeCounts(const QString &label, const TypeCounts &counts)
+{
+    // Identical and pairs are global facts about the comparison; "to check"
+    // is per panel, because a missing file exists on one side only by
+    // definition. Zero-valued fragments are dropped rather than printed as
+    // "0", so the line stays short enough to read at a glance.
+    QStringList parts;
+    if (counts.identicalClasses > 0) {
+        parts << QObject::tr("%n identical", "", counts.identicalClasses);
+    }
+    if (counts.pairs > 0) {
+        parts << QObject::tr("%n pair(s)", "", counts.pairs);
+    }
+    if (counts.onlyInA > 0) {
+        parts << QObject::tr("A: %n to check", "", counts.onlyInA);
+    }
+    if (counts.onlyInB > 0) {
+        parts << QObject::tr("B: %n to check", "", counts.onlyInB);
+    }
+    if (parts.isEmpty()) {
+        return {};
+    }
+    return QObject::tr("%1: %2").arg(label, parts.join(QStringLiteral(" · ")));
+}
+
+QString formatSummaryLine(const Summary &summary)
+{
+    QStringList kinds;
+    const QString gerber = formatTypeCounts(QObject::tr("Gerber"), summary.gerber);
+    if (!gerber.isEmpty()) {
+        kinds << gerber;
+    }
+    const QString other = formatTypeCounts(QObject::tr("Other"), summary.other);
+    if (!other.isEmpty()) {
+        kinds << other;
+    }
+    return kinds.join(QStringLiteral("    "));
 }
 
 Summary summarize(const ArchiveComparisonResult &result)

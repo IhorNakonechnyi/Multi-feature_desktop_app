@@ -6,6 +6,23 @@
 #include <QStringList>
 #include <QStyle>
 
+QString emptyAfterFilterMessage(const TreeFilter &filter)
+{
+    // Built as an accumulating qualifier so the criteria read as one phrase
+    // ("changed Gerber") instead of a list, and so no criterion contributes
+    // anything when it is off.
+    QString qualifier;
+    if (filter.changedOnly) {
+        qualifier += QObject::tr("changed ");
+    }
+    if (filter.kind == DataKind::GerberData) {
+        qualifier += QObject::tr("Gerber ");
+    } else if (filter.kind == DataKind::OtherData) {
+        qualifier += QObject::tr("other ");
+    }
+    return QObject::tr("No %1files to show").arg(qualifier);
+}
+
 ArchiveTreeModel::ArchiveTreeModel(QObject *parent)
     : QAbstractItemModel(parent)
 {

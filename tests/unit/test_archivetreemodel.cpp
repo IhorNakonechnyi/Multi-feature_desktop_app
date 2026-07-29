@@ -31,6 +31,7 @@ private slots:
     void emptiedFolderHides();
     void isEmptyAfterFilterReflectsResult();
     void filterSurvivesRebuild();
+    void emptyMessageNamesTheActiveCriteria();
 };
 
 namespace {
@@ -294,6 +295,31 @@ void TestArchiveTreeModel::filterSurvivesRebuild()
     });
 
     QCOMPARE(rowNames(model), QStringList({ "fresh_yellow.gbr" }));
+}
+
+void TestArchiveTreeModel::emptyMessageNamesTheActiveCriteria()
+{
+    // The message exists so an empty pane doesn't read as a bug, which only
+    // works if it names what the user actually switched on.
+    QCOMPARE(emptyAfterFilterMessage(TreeFilter{}), QStringLiteral("No files to show"));
+
+    TreeFilter changed;
+    changed.changedOnly = true;
+    QCOMPARE(emptyAfterFilterMessage(changed), QStringLiteral("No changed files to show"));
+
+    TreeFilter gerber;
+    gerber.kind = DataKind::GerberData;
+    QCOMPARE(emptyAfterFilterMessage(gerber), QStringLiteral("No Gerber files to show"));
+
+    TreeFilter other;
+    other.kind = DataKind::OtherData;
+    QCOMPARE(emptyAfterFilterMessage(other), QStringLiteral("No other files to show"));
+
+    // Both criteria read as one phrase, not a list.
+    TreeFilter both;
+    both.changedOnly = true;
+    both.kind = DataKind::GerberData;
+    QCOMPARE(emptyAfterFilterMessage(both), QStringLiteral("No changed Gerber files to show"));
 }
 
 QTEST_MAIN(TestArchiveTreeModel)
