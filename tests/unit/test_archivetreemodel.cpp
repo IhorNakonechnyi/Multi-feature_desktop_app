@@ -24,6 +24,13 @@ private slots:
     void directoriesFirstWithinBand();
     void sortBandRoleExposed();
     void sizeNoLongerOrders();
+
+    void changedOnlyHidesGreenFiles();
+    void kindFilterHidesOtherKind();
+    void filtersCombine();
+    void emptiedFolderHides();
+    void isEmptyAfterFilterReflectsResult();
+    void filterSurvivesRebuild();
 };
 
 namespace {
@@ -34,6 +41,13 @@ ArchiveEntry makeEntry(const QString &path, EntryClassification classification, 
     entry.relativePath = path;
     entry.classification = classification;
     entry.sizeBytes = size;
+    return entry;
+}
+
+ArchiveEntry makeEntry(const QString &path, EntryClassification classification, DataKind kind)
+{
+    ArchiveEntry entry = makeEntry(path, classification);
+    entry.kind = kind;
     return entry;
 }
 
@@ -156,6 +170,130 @@ void TestArchiveTreeModel::sizeNoLongerOrders()
     model.buildFrom(entries);
 
     QCOMPARE(rowNames(model), QStringList({ "a.gbr", "b.gbr" }));
+}
+
+// --- Task 17: filtering ---------------------------------------------------
+//
+// Filtering rebuilds the tree from the stored entry list rather than proxying
+// it, so these also pin the property that makes that choice worthwhile:
+// folders are inferred from surviving paths, so an emptied folder disappears
+// without any explicit hide-empty-parent rule.
+
+void TestArchiveTreeModel::changedOnlyHidesGreenFiles()
+{
+    const QVector<ArchiveEntry> entries = {
+        makeEntry("green.gbr", EntryClassification::Identical),
+        makeEntry("yellow.gbr", EntryClassification::Different),
+        makeEntry("red.gbr", EntryClassification::OnlyInThisArchive),
+    };
+
+    ArchiveTreeModel model;
+    model.buildFrom(entries);
+    QCOMPARE(rowNames(model).size(), 3);
+
+    TreeFilter filter;
+    filter.changedOnly = true;
+    model.setFilter(filter);
+
+    QCOMPARE(rowNames(model), QStringList({ "yellow.gbr", "red.gbr" }));
+}
+
+void TestArchiveTreeModel::kindFilterHidesOtherKind()
+{
+    const QVector<ArchiveEntry> entries = {
+        makeEntry("top.gtl", EntryClassification::Identical, DataKind::GerberData),
+        makeEntry("readme.txt", EntryClassification::Identical, DataKind::OtherData),
+    };
+
+    ArchiveTreeModel model;
+    model.buildFrom(entries);
+
+    TreeFilter filter;
+    filter.kind = DataKind::GerberData;
+    model.setFilter(filter);
+
+    QCOMPARE(rowNames(model), QStringList({ "top.gtl" }));
+}
+
+void TestArchiveTreeModel::filtersCombine()
+{
+    // Only the changed Gerber row satisfies both criteria; each of the other
+    // three fails exactly one of them, so a filter that AND-combines is the
+    // only one that produces this answer.
+    const QVector<ArchiveEntry> entries = {
+        makeEntry("changed.gtl", EntryClassification::Different, DataKind::GerberData),
+        makeEntry("same.gtl", EntryClassification::Identical, DataKind::GerberData),
+        makeEntry("changed.txt", EntryClassification::Different, DataKind::OtherData),
+        makeEntry("same.txt", EntryClassification::Identical, DataKind::OtherData),
+    };
+
+    ArchiveTreeModel model;
+    model.buildFrom(entries);
+
+    TreeFilter filter;
+    filter.changedOnly = true;
+    filter.kind = DataKind::GerberData;
+    model.setFilter(filter);
+
+    QCOMPARE(rowNames(model), QStringList({ "changed.gtl" }));
+}
+
+void TestArchiveTreeModel::emptiedFolderHides()
+{
+    // "docs" holds nothing but a green file, so under changed-only it has no
+    // surviving children - and therefore no reason to exist as a row.
+    const QVector<ArchiveEntry> entries = {
+        makeEntry("docs/readme.txt", EntryClassification::Identical),
+        makeEntry("gerber/changed.gbr", EntryClassification::Different),
+    };
+
+    ArchiveTreeModel model;
+    model.buildFrom(entries);
+    QCOMPARE(rowNames(model).size(), 2);
+
+    TreeFilter filter;
+    filter.changedOnly = true;
+    model.setFilter(filter);
+
+    QCOMPARE(rowNames(model), QStringList({ "gerber" }));
+}
+
+void TestArchiveTreeModel::isEmptyAfterFilterReflectsResult()
+{
+    const QVector<ArchiveEntry> entries = {
+        makeEntry("a.gbr", EntryClassification::Identical),
+        makeEntry("b.gbr", EntryClassification::Identical),
+    };
+
+    ArchiveTreeModel model;
+    model.buildFrom(entries);
+    QVERIFY(!model.isEmptyAfterFilter());
+
+    TreeFilter changedOnly;
+    changedOnly.changedOnly = true;
+    model.setFilter(changedOnly);
+    QVERIFY(model.isEmptyAfterFilter()); // every row was green
+
+    model.setFilter(TreeFilter{}); // cleared - the rows must come back
+    QVERIFY(!model.isEmptyAfterFilter());
+    QCOMPARE(rowNames(model).size(), 2);
+}
+
+void TestArchiveTreeModel::filterSurvivesRebuild()
+{
+    // A new comparison must not silently re-show what the user chose to
+    // hide: the control bar's state stays put, so the model's must too.
+    ArchiveTreeModel model;
+    TreeFilter filter;
+    filter.changedOnly = true;
+    model.setFilter(filter);
+
+    model.buildFrom({
+        makeEntry("fresh_green.gbr", EntryClassification::Identical),
+        makeEntry("fresh_yellow.gbr", EntryClassification::Different),
+    });
+
+    QCOMPARE(rowNames(model), QStringList({ "fresh_yellow.gbr" }));
 }
 
 QTEST_MAIN(TestArchiveTreeModel)

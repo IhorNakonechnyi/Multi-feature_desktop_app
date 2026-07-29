@@ -3,9 +3,19 @@
 #include <QAbstractItemModel>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "archivecomparisonresult.h"
+
+// What the tree is allowed to show. Criteria AND-combine; the defaults show
+// everything, which is the state the panel starts in (Q8: changed-only is
+// deliberately OFF by default - hiding rows before the user asks would make
+// the tree disagree with the summary line above it).
+struct TreeFilter {
+    bool changedOnly = false;     // keep only files that are not Identical
+    std::optional<DataKind> kind; // nullopt = every kind
+};
 
 // Backing node for ArchiveTreeModel. Folders are purely structural,
 // inferred from splitting each entry's relativePath on '/' - only file
@@ -47,8 +57,20 @@ public:
     explicit ArchiveTreeModel(QObject *parent = nullptr);
 
     // Rebuilds the whole tree from a flat, already-classified entry list
-    // (CrcComparator's output for one archive).
+    // (CrcComparator's output for one archive). The full list is kept, so a
+    // later setFilter() can widen the view again without re-comparing.
     void buildFrom(const QVector<ArchiveEntry> &entries);
+
+    // Re-applies over the stored entries. Filtering rebuilds the tree rather
+    // than wrapping it in a QSortFilterProxyModel, because folders are
+    // *inferred* from the surviving paths - so a folder whose children all
+    // disappear stops existing for free, with no separate hide-empty-parent
+    // rule to keep correct (Q8).
+    void setFilter(const TreeFilter &filter);
+
+    // True when nothing survives - the panel shows a message rather than an
+    // unexplained blank pane.
+    bool isEmptyAfterFilter() const;
 
     QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const override;
     QModelIndex parent(const QModelIndex &child) const override;
@@ -58,6 +80,14 @@ public:
 
 private:
     std::unique_ptr<ArchiveTreeNode> root_;
+
+    // The unfiltered truth, kept so filters are reversible.
+    QVector<ArchiveEntry> allEntries_;
+    TreeFilter filter_;
+
+    // Builds root_ from allEntries_ under the current filter.
+    void rebuild();
+    bool passesFilter(const ArchiveEntry &entry) const;
 
     // Fills in sortBand for the whole subtree and returns `node`'s own
     // band, so a directory can be scored from its children in the same

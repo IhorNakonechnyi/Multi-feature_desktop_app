@@ -13,14 +13,50 @@ ArchiveTreeModel::ArchiveTreeModel(QObject *parent)
     root_->isDirectory = true;
 }
 
+void ArchiveTreeModel::setFilter(const TreeFilter &filter)
+{
+    filter_ = filter;
+    rebuild();
+}
+
+bool ArchiveTreeModel::isEmptyAfterFilter() const
+{
+    return root_->children.empty();
+}
+
+bool ArchiveTreeModel::passesFilter(const ArchiveEntry &entry) const
+{
+    // AND-combined: every criterion the user switched on has to hold.
+    if (filter_.changedOnly && entry.classification == EntryClassification::Identical) {
+        return false;
+    }
+    if (filter_.kind.has_value() && entry.kind != *filter_.kind) {
+        return false;
+    }
+    return true;
+}
+
 void ArchiveTreeModel::buildFrom(const QVector<ArchiveEntry> &entries)
+{
+    // The filter deliberately survives: a fresh comparison must not silently
+    // re-show rows the user chose to hide, since the control bar driving the
+    // filter keeps its state too.
+    allEntries_ = entries;
+    rebuild();
+}
+
+void ArchiveTreeModel::rebuild()
 {
     beginResetModel();
 
     root_ = std::make_unique<ArchiveTreeNode>();
     root_->isDirectory = true;
 
-    for (const auto &entry : entries) {
+    for (const auto &entry : allEntries_) {
+        if (!passesFilter(entry)) {
+            continue; // folders are inferred below, so this hides emptied
+                      // folders too, with no separate rule for them
+        }
         const QStringList segments = entry.relativePath.split(QLatin1Char('/'), Qt::SkipEmptyParts);
         ArchiveTreeNode *current = root_.get();
 
