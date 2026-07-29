@@ -12,7 +12,32 @@ void ArchiveTreeDelegate::paint(QPainter *painter, const QStyleOptionViewItem &o
 
     QStyleOptionViewItem opt(option);
 
-    if (!isDirectory) {
+    if (isDirectory) {
+        // A folder is sorted by the worst band anywhere below it (Q9), so it
+        // has to *look* sorted too - otherwise a collapsed folder at the top
+        // of the pane gives no hint why it is there. Deliberately lighter
+        // than a file row: just a bar at the leading edge, no background
+        // fill and no text recolor, so a folder holding one changed file
+        // doesn't turn the whole pane into a wall of color.
+        constexpr int kBandBarWidth = 4;
+
+        QColor edge; // left default-constructed (invalid) for band 2 -
+                     // an all-green folder stays undecorated, since there
+                     // is nothing to do inside it.
+        switch (index.data(ArchiveTreeModel::SortBandRole).toInt()) {
+        case 0:
+            edge = Palette::changedBackground();
+            break;
+        case 1:
+            edge = Palette::missingBackground();
+            break;
+        }
+
+        if (edge.isValid()) {
+            painter->fillRect(QRect(option.rect.left(), option.rect.top(), kBandBarWidth, option.rect.height()),
+                              edge);
+        }
+    } else {
         const auto classification = index.data(ArchiveTreeModel::ClassificationRole).value<EntryClassification>();
         QColor background;
         QColor foreground;
