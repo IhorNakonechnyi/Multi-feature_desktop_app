@@ -1,8 +1,12 @@
 # Archive Compare — gap review decisions (Q1–Q15)
 
 **Started:** 2026-07-27 · **Completed:** 2026-07-28 (two sessions)
-**Status:** **ALL QUESTIONS DECIDED — Q1–Q15. Nothing has been implemented.**
-The next step is one consolidated implementation plan.
+**Status:** **ALL QUESTIONS DECIDED AND IMPLEMENTED** — Q1–Q15, on branch
+`archive-compare-content-first` (19 tasks of
+`docs/superpowers/plans/2026-07-28-archive-compare-content-first-consolidated.md`),
+finished and verified 2026-07-29. **Not merged to `main`, not pushed** — integration
+is a separate explicit call.
+Q5/Q6 were dissolved by Q1; Q11/Q13/Q14/Q15 produced no code by decision.
 **Purpose:** every known gap in the Archive Compare feature, worked through one
 question at a time, each decided as fix now / fix later / accept and document.
 

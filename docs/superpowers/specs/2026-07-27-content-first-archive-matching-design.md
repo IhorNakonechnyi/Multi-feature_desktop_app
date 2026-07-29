@@ -1,6 +1,12 @@
 # Content-first archive matching
 
-**Status**: Approved, not yet implemented.
+**Status**: **Implemented** on branch `archive-compare-content-first` (Tasks 3–5 of
+`docs/superpowers/plans/2026-07-28-archive-compare-content-first-consolidated.md`),
+verified 2026-07-29. Not merged to `main`.
+Two amendments made during implementation, both recorded in that plan: duplicates
+get **no marker at all** (plain green, per Q9, not the `duplicate` badge this
+document originally promised), and a nested archive whose content class already
+exists in the other archive is never opened (per Q4's two-phase read).
 **Supersedes**: the matching half of `2026-07-15-path-tolerant-crc-matching-design.md`
 (that document's Pass 1 / Pass 2 ordering and its ambiguity rule), plus the
 self-duplicate suppression added later in commits `30ec7e0` and `6502548`.

@@ -1,6 +1,10 @@
 # Content-based drawability
 
-**Status**: Approved, not yet implemented.
+**Status**: **Implemented** on branch `archive-compare-content-first` (Tasks 9–10 of
+`docs/superpowers/plans/2026-07-28-archive-compare-content-first-consolidated.md`),
+verified 2026-07-29. Not merged to `main`.
+Q12 is fully resolved, not just "substantially": the entire user-extension
+mechanism was deleted rather than demoted, and the sniff window widened to 8 KB.
 **Relates to**: Q2 of `docs/superpowers/plans/2026-07-27-archive-compare-open-questions.md`.
 Substantially resolves Q12 (user-added extension list) as a side effect.
 Independent of `2026-07-27-content-first-archive-matching-design.md` — that one
