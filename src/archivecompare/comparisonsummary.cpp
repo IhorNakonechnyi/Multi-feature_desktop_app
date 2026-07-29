@@ -3,7 +3,11 @@
 #include <map>
 #include <utility>
 
+#include <QFileInfo>
 #include <QHash>
+#include <QSet>
+
+#include "../gerber/gerberfiletype.h"
 
 namespace ComparisonSummary {
 
@@ -51,6 +55,60 @@ QHash<QString, DataKind> kindByPath(const QVector<ArchiveEntry> &entries)
 }
 
 } // namespace
+
+namespace {
+
+// Extensions that settle the question on their own. Kept deliberately short:
+// an extension only earns a place here if being wrong about it is
+// implausible. Anything else is cheaper to read than to guess about.
+const QSet<QString> &conclusiveGerberSuffixes()
+{
+    static const QSet<QString> suffixes = {
+        // Layer data
+        "gtl", "gbl", "gts", "gbs", "gto", "gbo", "gtp", "gbp",
+        "gko", "gml", "gbr", "cmp", "sol", "stc", "sts", "plc", "ger",
+        // Drill - folded in with Gerber, since Q2 makes both previewable
+        "drl", "xln", "drd",
+    };
+    return suffixes;
+}
+
+// Documents, images and containers, which are never layer data.
+const QSet<QString> &conclusiveOtherSuffixes()
+{
+    static const QSet<QString> suffixes = {
+        "pdf", "doc", "docx", "xls", "xlsx",
+        "png", "jpg", "jpeg", "bmp", "gif",
+        "zip", "rar", "7z", "tgz", "tar", "gz", "brd", "html", "htm",
+    };
+    return suffixes;
+}
+
+} // namespace
+
+void resolveKinds(QVector<ArchiveEntry> &entries, const HeadReader &readHead)
+{
+    for (ArchiveEntry &entry : entries) {
+        const QString suffix = QFileInfo(entry.relativePath).suffix().toLower();
+
+        if (conclusiveGerberSuffixes().contains(suffix)) {
+            entry.kind = DataKind::GerberData;
+            continue;
+        }
+        if (conclusiveOtherSuffixes().contains(suffix)) {
+            entry.kind = DataKind::OtherData;
+            continue;
+        }
+
+        // Ambiguous - txt, csv, no extension at all, or something nobody
+        // anticipated. Ask the bytes. NotDrawable is the honest answer for
+        // anything the parsers could not render anyway.
+        const GerberFileType::Drawability drawability =
+            GerberFileType::classify(readHead(entry.relativePath));
+        entry.kind = drawability != GerberFileType::Drawability::NotDrawable ? DataKind::GerberData
+                                                                            : DataKind::OtherData;
+    }
+}
 
 bool Summary::fullyIdentical() const
 {

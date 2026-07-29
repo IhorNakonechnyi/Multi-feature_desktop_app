@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
 
+#include <QHash>
+#include <QSet>
+#include <QStringList>
+
 #include "archivecompare/archivecomparisonresult.h"
 #include "archivecompare/comparisonsummary.h"
 
@@ -22,6 +26,12 @@ private slots:
     void fullyIdenticalDetected();
     void yellowClassIsNotToCheck();
     void onlyRepresentativeCarriesTheClassification();
+
+    void conclusiveGerberExtensionNotRead();
+    void conclusiveOtherExtensionNotRead();
+    void txtIsSniffed();
+    void unknownExtensionSniffed();
+    void noExtensionSniffed();
 };
 
 namespace {
@@ -181,6 +191,104 @@ void TestComparisonSummary::onlyRepresentativeCarriesTheClassification()
     const auto summary = ComparisonSummary::summarize(result);
     QCOMPARE(summary.other.onlyInA, 1);
     QCOMPARE(summary.other.identicalClasses, 0); // one-sided, so not identical
+}
+
+// --- Task 15: kind resolution -------------------------------------------
+//
+// Every case below asserts BOTH the resulting kind AND exactly which paths
+// the reader was asked for. The read set is the load-bearing half: without
+// it, "sniffed and found to be Other" is indistinguishable from "never
+// looked at", since OtherData is also the default.
+
+namespace {
+
+// Records what got read, so a test can tell trusting an extension apart
+// from sniffing a file that happened to give the same answer.
+struct RecordingReader {
+    QHash<QString, QByteArray> heads;
+    mutable QStringList readPaths;
+
+    ComparisonSummary::HeadReader reader()
+    {
+        return [this](const QString &path) {
+            readPaths << path;
+            return heads.value(path);
+        };
+    }
+};
+
+ArchiveEntry pathOnly(const QString &path)
+{
+    ArchiveEntry e;
+    e.relativePath = path;
+    return e;
+}
+
+} // namespace
+
+void TestComparisonSummary::conclusiveGerberExtensionNotRead()
+{
+    QVector<ArchiveEntry> entries = { pathOnly("gerber/top.gtl") };
+    RecordingReader reader;
+
+    ComparisonSummary::resolveKinds(entries, reader.reader());
+
+    QCOMPARE(entries.at(0).kind, DataKind::GerberData);
+    QVERIFY2(reader.readPaths.isEmpty(), "a conclusive extension must not cost a read");
+}
+
+void TestComparisonSummary::conclusiveOtherExtensionNotRead()
+{
+    QVector<ArchiveEntry> entries = { pathOnly("docs/spec.pdf") };
+    RecordingReader reader;
+
+    ComparisonSummary::resolveKinds(entries, reader.reader());
+
+    QCOMPARE(entries.at(0).kind, DataKind::OtherData);
+    QVERIFY2(reader.readPaths.isEmpty(), "a conclusive extension must not cost a read");
+}
+
+void TestComparisonSummary::txtIsSniffed()
+{
+    // The case the whole rule exists for: the real drill file in the sample
+    // data is a .TXT. Trusting the extension would file it under Other and
+    // the summary would claim there is nothing previewable to look at.
+    QVector<ArchiveEntry> entries = { pathOnly("drill.txt"), pathOnly("notes.txt") };
+    RecordingReader reader;
+    reader.heads.insert("drill.txt", "M48\nFMAT,2\n");
+    reader.heads.insert("notes.txt", "hello, this is not layer data");
+
+    ComparisonSummary::resolveKinds(entries, reader.reader());
+
+    QCOMPARE(entries.at(0).kind, DataKind::GerberData);
+    QCOMPARE(entries.at(1).kind, DataKind::OtherData);
+    QCOMPARE(QSet<QString>(reader.readPaths.begin(), reader.readPaths.end()),
+             QSet<QString>({ "drill.txt", "notes.txt" }));
+}
+
+void TestComparisonSummary::unknownExtensionSniffed()
+{
+    QVector<ArchiveEntry> entries = { pathOnly("layer.g1") };
+    RecordingReader reader;
+    reader.heads.insert("layer.g1", "%FSLAX35Y35*%\n%MOMM*%\n");
+
+    ComparisonSummary::resolveKinds(entries, reader.reader());
+
+    QCOMPARE(entries.at(0).kind, DataKind::GerberData);
+    QCOMPARE(reader.readPaths, QStringList({ "layer.g1" }));
+}
+
+void TestComparisonSummary::noExtensionSniffed()
+{
+    QVector<ArchiveEntry> entries = { pathOnly("readme") };
+    RecordingReader reader;
+    reader.heads.insert("readme", "just some text");
+
+    ComparisonSummary::resolveKinds(entries, reader.reader());
+
+    QCOMPARE(entries.at(0).kind, DataKind::OtherData);
+    // Asserting the read happened is what stops this passing by default.
+    QCOMPARE(reader.readPaths, QStringList({ "readme" }));
 }
 
 QTEST_MAIN(TestComparisonSummary)

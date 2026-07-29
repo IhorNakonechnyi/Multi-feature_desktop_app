@@ -1,5 +1,9 @@
 #pragma once
 
+#include <functional>
+
+#include <QByteArray>
+
 #include "archivecomparisonresult.h"
 
 // The one-line summary above the two panels (Q8), split by data kind so the
@@ -30,6 +34,24 @@ struct Summary {
     // identical too.
     bool fullyIdentical() const;
 };
+
+// Supplies the first bytes of an entry, for the files whose extension does
+// not settle the question. Injected rather than called directly so this stays
+// testable without an archive on disk.
+using HeadReader = std::function<QByteArray(const QString &relativePath)>;
+
+// Fills in each entry's `kind`, which summarize() then consumes.
+//
+// A conclusive extension is trusted and the file is never read; only an
+// ambiguous one is sniffed. That keeps the cost proportional to the genuinely
+// unclear files while staying accurate exactly where extensions lie - the
+// real drill file in the sample data is a .TXT, which is why txt is
+// deliberately NOT in the conclusive list.
+//
+// This table types the summary and nothing else. It is not a revival of the
+// eligibility list Q12 deleted, and there is no user-editable version of it:
+// what a file can be PARSED as is still decided purely by content.
+void resolveKinds(QVector<ArchiveEntry> &entries, const HeadReader &readHead);
 
 // Always summarizes the WHOLE result, never a filtered view - the summary is
 // the fixed truth the filters are applied against, so it must not move when

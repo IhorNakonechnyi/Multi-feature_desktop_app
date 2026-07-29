@@ -38,6 +38,7 @@ add_test(NAME test_archivetreemodel COMMAND test_archivetreemodel)
 add_executable(test_comparisonsummary
     test_comparisonsummary.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp # kind sniffing (Task 15)
 )
 target_include_directories(test_comparisonsummary PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_comparisonsummary PRIVATE Qt6::Core Qt6::Test)
