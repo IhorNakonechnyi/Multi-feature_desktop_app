@@ -53,6 +53,14 @@ hand-rolled parser like `GerberParser`.
   and/or an inline digit-format suffix some tools emit (e.g. `METRIC,LZ,000.000`).
 - Tool table: `T##C<diameter>` lines (plus any other per-tool parameters present) mapping a tool
   number to a hole/slot diameter, converted to integer nm using the declared units.
+  **Correction (2026-07-29, commit `bd329fa`):** "plus any other per-tool parameters present"
+  was aspirational — the implementation only read the diameter when `C` came *immediately*
+  after the tool number, so a real file writing `T1F00S00C0.200` (optional feed and
+  spindle-speed modifiers first) yielded no diameter at all. The failure was silent and
+  misleading: the holes still parsed, so the layer reported the right object count while every
+  hole referenced a tool with no aperture and nothing drew. `parseToolLine` now walks the
+  line's fields looking for `C`. Other modifiers (`B`, `H`, `Z`, …) are skipped as unknown
+  fields; the same field walk is where to add one if a file ever needs it.
 - `%` or `M95` ends the header.
 
 ### Coordinate format resolution

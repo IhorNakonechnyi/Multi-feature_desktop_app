@@ -31,6 +31,15 @@ he wanted:
   mockup. Confirmed acceptable: each tree's nested folder display, expand/collapse, and scrolling
   (`QTreeView` + `ArchiveTreeModel`) is unaffected by the column becoming fixed-width — only the
   ability to drag the column wider/narrower is lost.
+
+  **Superseded twice.** The width became 252 px (+20%) during implementation, and as of
+  2026-07-29 (commit `0b82b05`) it is **no longer fixed at all**: `ArchiveComparePage::
+  updatePanelWidths()` scales the columns with the window, interpolating between 252 px at a
+  1100 px window and 384 px at a maximized 1920 px one (= 40% of window width), floored at
+  252. A flat width meant every extra pixel from maximizing went to the overlay canvas, so the
+  columns' share *fell* from ~46% to ~26% — long archive filenames were hardest to read
+  exactly when the screen had the most room. The columns are still not user-draggable, which
+  is the part of this decision that stands.
 - **Mismatched-pairs list becomes click-to-preview.** Today nothing is selected by default after a
   comparison runs (`gerberPairList_` is populated via `clear()`/`addItem()` with no
   `setCurrentRow()`), and `showButton_` starts disabled until a row is selected. Removing the button
@@ -94,7 +103,12 @@ New neutral/card/accent tokens (hex values are exact, taken from the 1b design d
 Replace the current stacked layout (top: `QSplitter(panelA_, panelB_)` at 70% height; bottom:
 `gerberDiffContent_` at 30% height) with one full-height row (`QHBoxLayout`):
 
-`panelA_` (fixed ~210px card) — `panelB_` (fixed ~210px card) — right column (stretch, `QVBoxLayout`):
+`panelA_` (card) — `panelB_` (card) — right column (stretch, `QVBoxLayout`):
+
+> Both the width and this two-widget layout have since changed: the columns scale with the
+> window (see above), and Q8's filter bar split each panel into an `ArchiveHeader` above the
+> bar and an `ArchivePanel` tree below it, arranged in a `QGridLayout`. See
+> `2026-07-29-archive-compare-summary-filters-and-bands-design.md`.
 
 1. **Pairs card** — the pill row (`gerberPairList_`, restyled but still the same `QListWidget`) plus,
    below it, the existing skipped-pairs messaging (`skippedUnrecognizedLabel_` + its "Add .ext"
