@@ -38,9 +38,9 @@ Two things worth noting:
 - `test_pair_3`'s 24-of-25 **matches the Q15 measurement taken during the gap review**
   ("pair_3 matches 24/25 classes byte-for-byte, its one differing file differs in real
   coordinate records") — independent corroboration from a different code path.
-- In both pairs the differing files sit at **different paths on each side**
-  (`5435/347128-C_EX.TXT` ↔ `347128-C_EX.TXT`), so content-first matching across a
-  folder relocation is confirmed on real data, not just in fixtures.
+- In both pairs the differing files sit at **different paths on each side** (one nested under
+  a folder named after its archive, the other at the archive root), so content-first matching
+  across a folder relocation is confirmed on real data, not just in fixtures.
 
 `test_pair_1` is Igor's hand-built fixture: 20 rows collapse to 12 classes (10 identical +
 2 only-in-A). Duplicate collapse is visible there, but **its behaviour is not real customer

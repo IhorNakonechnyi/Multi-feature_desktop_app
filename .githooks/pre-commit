@@ -1,0 +1,59 @@
+#!/bin/sh
+# Tripwire: refuse to commit real confidential identifiers into this PUBLIC repo.
+#
+# This repo ships a generic engine; everything company-specific (real parameter
+# names, supplier names, customer part numbers) is supposed to live only in
+# local, untracked files. This hook is the cheap insurance the design doc
+# (docs/designUI/pcb-advisor-design.md, section 2) asked for and that a real
+# leak later proved necessary - a customer part number reached a committed
+# design doc and was pushed to GitHub before anyone noticed.
+#
+# The patterns themselves are confidential, so they are NOT stored in the repo.
+# They live in the git directory, which is never part of any commit:
+#
+#   .git/confidential-patterns        (one pattern per line, # comments allowed)
+#
+# In a worktree the file is shared, because --git-common-dir points at the main
+# repo's .git. Absent file = hook stays quiet and allows the commit; it warns
+# once so a missing tripwire cannot be mistaken for a clean scan.
+#
+# To bypass deliberately:  git commit --no-verify
+
+patterns_file="$(git rev-parse --git-common-dir)/confidential-patterns"
+
+if [ ! -f "$patterns_file" ]; then
+    echo "note: no confidential-patterns file; leak tripwire is inactive." >&2
+    echo "      create $patterns_file to enable it." >&2
+    exit 0
+fi
+
+# Only the staged content, and only added lines - an existing occurrence
+# elsewhere in a touched file should not block an unrelated commit.
+staged_additions=$(git diff --cached --unified=0 | grep '^+' | grep -v '^+++')
+
+found=0
+while IFS= read -r pattern || [ -n "$pattern" ]; do
+    case "$pattern" in
+        ''|\#*) continue ;;
+    esac
+    if printf '%s' "$staged_additions" | grep -qiF "$pattern"; then
+        if [ "$found" -eq 0 ]; then
+            echo "" >&2
+            echo "COMMIT BLOCKED - confidential identifier in staged changes:" >&2
+        fi
+        found=1
+        echo "  * '$pattern' appears in:" >&2
+        git diff --cached --name-only -S"$pattern" | sed 's/^/      /' >&2
+    fi
+done < "$patterns_file"
+
+if [ "$found" -ne 0 ]; then
+    echo "" >&2
+    echo "Remove or genericise it. This repo is public and pushed history cannot" >&2
+    echo "be un-published. If the match is a false positive:" >&2
+    echo "  git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0

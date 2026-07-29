@@ -774,7 +774,7 @@ Go to Archive Compare.
 Using the real archives at `.claude/worktrees/gerber-parser-3b2/Test_data/`:
 
 - **test_pair_1** (byte-identical re-zip): load both sides → no differing pairs → the Gerber section stays hidden entirely.
-- **test_pair_2** (`5435.zip` vs `219007_347128-C.zip`): load both sides → the changed `.GER` pair appears in the list. Select it, click Show → the overlay renders; the known change shows as a pure green or red patch on a yellow background (not just one flat color).
+- **test_pair_2** (its two archives): load both sides → the changed `.GER` pair appears in the list. Select it, click Show → the overlay renders; the known change shows as a pure green or red patch on a yellow background (not just one flat color).
 - **test_pair_3**: load both sides → skipped-pairs row appears ("N changed pair(s) skipped - unrecognized file extension:") with one Add button per extension (e.g. `.G1`, `.GPT`). Click one Add button → the matching pair moves into the eligible list immediately (no reload needed). Select it, click Show → the single added trace shows as a pure color, and the `%LPC` cutout layer still renders as a hole (not solid), confirming no regression from the M3 gate.
 - Render-time label updates on every Show and every pan/zoom settle, now reflecting two-layer render cost.
 

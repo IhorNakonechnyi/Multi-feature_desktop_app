@@ -1,0 +1,44 @@
+#!/bin/sh
+# Tripwire for the commit MESSAGE, not the diff.
+#
+# Separate hook because this is a separate leak path, and a real one: a
+# customer part number reached this repo's history through a commit message
+# describing which test file exposed a bug, while the diff itself was clean.
+# Messages are as public as the code and are far harder to correct later -
+# rewriting them rewrites every commit that follows.
+#
+# Patterns live in .git/confidential-patterns (never committable). See
+# .githooks/pre-commit for the format.
+#
+# To bypass deliberately:  git commit --no-verify
+
+patterns_file="$(git rev-parse --git-common-dir)/confidential-patterns"
+message_file="$1"
+
+[ -f "$patterns_file" ] || exit 0
+
+found=0
+while IFS= read -r pattern || [ -n "$pattern" ]; do
+    case "$pattern" in
+        ''|\#*) continue ;;
+    esac
+    # Ignore comment lines git strips from the final message anyway.
+    if grep -v '^#' "$message_file" | grep -qiF "$pattern"; then
+        if [ "$found" -eq 0 ]; then
+            echo "" >&2
+            echo "COMMIT BLOCKED - confidential identifier in the commit message:" >&2
+        fi
+        found=1
+        echo "  * '$pattern'" >&2
+    fi
+done < "$patterns_file"
+
+if [ "$found" -ne 0 ]; then
+    echo "" >&2
+    echo "Reword it. Message history is public and expensive to rewrite." >&2
+    echo "If the match is a false positive:  git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0

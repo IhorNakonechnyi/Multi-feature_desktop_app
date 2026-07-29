@@ -27,7 +27,27 @@ Newer feature work is driven through these design/plan docs rather than spec-kit
 spec-kit scaffolding below is still present and still describes feature `001`, but has not
 been the working process for recent features.
 
-**Confidentiality**: `specs/` is gitignored and exists only locally. It documents the confidential internal PCB spec/supplier-data structure (the structure itself, not just values, is confidential) and must never be committed to this public repo. `.vscode/` is also gitignored (personal editor settings). See `.gitignore`.
+**Confidentiality**: `specs/` is gitignored and exists only locally. It documents the confidential internal PCB spec/supplier-data structure (the structure itself, not just values, is confidential) and must never be committed to this public repo. `Test_data/` (real supplier archives) and `.vscode/` are gitignored too. See `.gitignore`.
+
+**Leak tripwire.** Two git hooks in `.githooks/` refuse commits containing real identifiers —
+`pre-commit` scans staged additions, `commit-msg` scans the message. Both paths have leaked
+before: a customer part number reached a design doc *and* two commit messages, and was pushed.
+
+Enable it once per clone (hooks path is local config, not committed):
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+The patterns are themselves confidential, so they are not in the repo. They live in
+`.git/confidential-patterns` — one per line, matched case-insensitively as fixed strings —
+which is inside the git directory and therefore impossible to commit, and shared by every
+worktree. **A fresh clone has no such file, and the hooks then stay silent** (they print a
+one-line notice so an inactive tripwire is not mistaken for a clean scan). Recreate it before
+relying on them. Add real spec parameter names and supplier names to it as they come up.
+
+Note the tripwire only protects *future* commits. Anything already pushed is public
+permanently; correcting history needs a rewrite and a force-push.
 
 ## Commands
 
