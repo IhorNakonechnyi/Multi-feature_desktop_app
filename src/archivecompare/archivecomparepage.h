@@ -29,6 +29,7 @@ public:
 
 private:
     void runComparison();
+    void clearSummary();
     void updateNotDrawableLabel(int count);
     void showSelectedPair();
     void renderShownPair(const QRectF &windowMm, double pxPerMm);
@@ -36,6 +37,11 @@ private:
 
     ArchivePanel *panelA_;
     ArchivePanel *panelB_;
+
+    // Full width under the page title, so they describe both panels at once
+    // rather than appearing to belong to either side.
+    QLabel *summaryLabel_;
+    QLabel *identicalBanner_;
 
     QListWidget *gerberPairList_;
     QLabel *pairStatusLabel_;

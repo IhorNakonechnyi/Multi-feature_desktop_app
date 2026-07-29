@@ -40,6 +40,12 @@ QString themeStylesheet()
     rules << QString("#canvasCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("#detailCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("QLabel#detailLabel { color: %1; font-size: 12px; }").arg(Palette::DetailText);
+    // The "nothing differs" banner. Uses the same green as an identical row
+    // so the page says one thing in one colour, and is padded into a band
+    // rather than left as loose text - it is a conclusion, not a detail.
+    rules << QString("QLabel#identicalBanner { background: %1; color: %2; font-size: 12px; "
+                     "padding: 8px 10px; border-radius: 6px; }")
+                 .arg(Palette::SameBackground, Palette::SameForeground);
 
     return rules.join('\n');
 }

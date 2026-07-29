@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "../gerber/compositeview.h"
@@ -17,6 +18,7 @@
 #include "archivecomparison.h"
 #include "archivepanel.h"
 #include "archivereader.h"
+#include "comparisonsummary.h"
 #include "gerberdifftrigger.h"
 
 namespace {
@@ -82,6 +84,33 @@ QString formatPairLabel(const DifferingPair &pair)
     return label;
 }
 
+// One kind's fragment of the summary line, e.g. "Gerber: 9 identical - 2
+// pairs - A: 1 to check". Identical and pairs are global facts about the
+// comparison; "to check" is per panel, because a missing file exists on one
+// side only by definition. Zero-valued fragments are dropped rather than
+// printed as "0", so the line stays short enough to read at a glance - and
+// an empty kind contributes nothing at all.
+QString formatTypeCounts(const QString &label, const ComparisonSummary::TypeCounts &counts)
+{
+    QStringList parts;
+    if (counts.identicalClasses > 0) {
+        parts << QObject::tr("%n identical", "", counts.identicalClasses);
+    }
+    if (counts.pairs > 0) {
+        parts << QObject::tr("%n pair(s)", "", counts.pairs);
+    }
+    if (counts.onlyInA > 0) {
+        parts << QObject::tr("A: %n to check", "", counts.onlyInA);
+    }
+    if (counts.onlyInB > 0) {
+        parts << QObject::tr("B: %n to check", "", counts.onlyInB);
+    }
+    if (parts.isEmpty()) {
+        return {};
+    }
+    return QObject::tr("%1: %2").arg(label, parts.join(QStringLiteral(" · ")));
+}
+
 } // namespace
 
 ArchiveComparePage::ArchiveComparePage(QWidget *parent)
@@ -95,6 +124,19 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     auto *title = new QLabel(tr("Archive compare"));
     title->setObjectName("pageTitle");
     layout->addWidget(title);
+
+    summaryLabel_ = new QLabel;
+    summaryLabel_->setObjectName("detailLabel");
+    layout->addWidget(summaryLabel_);
+
+    // A banner, deliberately not a modal: "the customer resent what we
+    // already have" is a common outcome, and making the user dismiss a
+    // dialog every time would tax the case that costs them the least work.
+    identicalBanner_ = new QLabel;
+    identicalBanner_->setObjectName("identicalBanner");
+    identicalBanner_->setWordWrap(true);
+    identicalBanner_->setVisible(false);
+    layout->addWidget(identicalBanner_);
 
     auto *contentRow = new QHBoxLayout;
     contentRow->setSpacing(12);
@@ -207,6 +249,7 @@ void ArchiveComparePage::runComparison()
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
     compareTimeLabel_->setText(tr("Compare time: -"));
+    clearSummary();
     panelA_->showEntries({});
     panelB_->showEntries({});
 
@@ -221,7 +264,8 @@ void ArchiveComparePage::runComparison()
     // inline via showError() instead of a modal dialog that would force the
     // user to dismiss it before seeing which side failed and how the other
     // side fared.
-    const ArchiveComparison::Outcome outcome = ArchiveComparison::compareArchives(pathA, pathB);
+    // Not const: resolveKinds fills in each entry's DataKind in place below.
+    ArchiveComparison::Outcome outcome = ArchiveComparison::compareArchives(pathA, pathB);
 
     if (!outcome.errorA.isEmpty()) {
         panelA_->showError(outcome.errorA);
@@ -237,6 +281,40 @@ void ArchiveComparePage::runComparison()
         return; // can't produce a meaningful comparison with one side unreadable
     }
 
+    // Each reader only reads the small head its side actually needs
+    // classified - readEntryHead caps the read at kClassifySniffBytes
+    // instead of decompressing the whole entry, which matters because a
+    // real file can run tens of KB and classification only ever looks at
+    // the first few lines. Declared here because both the summary's kind
+    // resolution and the overlay's pair bucketing below use them.
+    const auto readHeadA = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(panelA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
+    const auto readHeadB = [this](const QString &relativePath) {
+        return ArchiveReader::readEntryHead(panelB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+    };
+
+    // Before showEntries, so the entries the panels receive already carry
+    // their kind. Conclusive extensions cost nothing here; only genuinely
+    // ambiguous files are read (Q8).
+    ComparisonSummary::resolveKinds(outcome.result.entriesA, readHeadA);
+    ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
+
+    const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
+    const QString gerberPart = formatTypeCounts(tr("Gerber"), summary.gerber);
+    const QString otherPart = formatTypeCounts(tr("Other"), summary.other);
+    QStringList summaryParts;
+    if (!gerberPart.isEmpty()) {
+        summaryParts << gerberPart;
+    }
+    if (!otherPart.isEmpty()) {
+        summaryParts << otherPart;
+    }
+    summaryLabel_->setText(summaryParts.join(QStringLiteral("    ")));
+
+    identicalBanner_->setText(tr("No differences - both archives contain the same data."));
+    identicalBanner_->setVisible(summary.fullyIdentical());
+
     panelA_->showEntries(outcome.result.entriesA);
     panelB_->showEntries(outcome.result.entriesB);
     // The pipeline just ran to completion, so - unlike renderTimeLabel_
@@ -247,18 +325,7 @@ void ArchiveComparePage::runComparison()
 
     // Content, not extension, decides which pairs the overlay can draw
     // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
-    // design.md). Each reader only reads the small head each side actually
-    // needs classified - readEntryHead caps the read at
-    // GerberFileType::kClassifySniffBytes instead of decompressing the
-    // whole entry, which matters because a differing pair's real file can
-    // run tens of KB and classification only ever looks at the first few
-    // lines.
-    const auto readHeadA = [this](const QString &relativePath) {
-        return ArchiveReader::readEntryHead(panelA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
-    };
-    const auto readHeadB = [this](const QString &relativePath) {
-        return ArchiveReader::readEntryHead(panelB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
-    };
+    // design.md). Reuses the same head readers declared above.
     const GerberDiffTrigger::PairBuckets buckets =
         GerberDiffTrigger::classifyPairs(outcome.result.differingPairs, readHeadA, readHeadB);
 
@@ -275,6 +342,15 @@ void ArchiveComparePage::runComparison()
     renderTimeLabel_->setText(tr("Render time: -"));
 
     updateNotDrawableLabel(buckets.notDrawable.size());
+}
+
+void ArchiveComparePage::clearSummary()
+{
+    // Both are claims about a completed comparison, so neither may outlive
+    // one. A stale "No differences" banner after a failed re-pick would be
+    // the most misleading thing on the page.
+    summaryLabel_->clear();
+    identicalBanner_->setVisible(false);
 }
 
 void ArchiveComparePage::updateNotDrawableLabel(int count)
