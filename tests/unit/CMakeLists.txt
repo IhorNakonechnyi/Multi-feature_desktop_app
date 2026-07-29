@@ -35,6 +35,14 @@ target_include_directories(test_archivetreemodel PRIVATE ${CMAKE_SOURCE_DIR}/src
 target_link_libraries(test_archivetreemodel PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
 add_test(NAME test_archivetreemodel COMMAND test_archivetreemodel)
 
+add_executable(test_comparisonsummary
+    test_comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+)
+target_include_directories(test_comparisonsummary PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_comparisonsummary PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME test_comparisonsummary COMMAND test_comparisonsummary)
+
 # Header-only helper, so no .cpp of its own to compile in.
 add_executable(test_archivedroputil
     test_archivedroputil.cpp

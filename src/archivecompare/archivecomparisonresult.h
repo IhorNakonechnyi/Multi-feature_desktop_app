@@ -20,6 +20,16 @@ enum class PairReason {
     OnlyExtensionCandidate, // elimination: exactly one class per side with this extension
 };
 
+// Which family a file belongs to, for the split summary line (Q8). Only two
+// buckets because only one distinction matters to the user: "can this app
+// show me the difference?" Drill files are folded into GerberData - Q2 made
+// drawability a content question, and a drill file is previewable exactly as
+// a Gerber layer is.
+enum class DataKind {
+    GerberData,
+    OtherData,
+};
+
 // One classified file as it will appear in ONE archive's tree pane.
 // relativePath is the file's full path within its own archive (a nested
 // zip's own name becomes a path segment, so a file inside a nested zip
@@ -30,6 +40,8 @@ struct ArchiveEntry {
     quint32 crc32 = 0;   // half of the (crc32, size) content-class key. Internal
                          // plumbing for class counting (Q8 summary) - never displayed (Q9).
     EntryClassification classification = EntryClassification::Identical;
+    DataKind kind = DataKind::OtherData; // resolved in Task 15; defaults to the
+                                         // conservative "not previewable"
 };
 
 // A file classified Different on both sides, naming which A-file pairs
