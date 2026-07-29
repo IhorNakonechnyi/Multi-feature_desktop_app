@@ -35,6 +35,14 @@ target_include_directories(test_archivetreemodel PRIVATE ${CMAKE_SOURCE_DIR}/src
 target_link_libraries(test_archivetreemodel PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
 add_test(NAME test_archivetreemodel COMMAND test_archivetreemodel)
 
+# Header-only helper, so no .cpp of its own to compile in.
+add_executable(test_archivedroputil
+    test_archivedroputil.cpp
+)
+target_include_directories(test_archivedroputil PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivedroputil PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME test_archivedroputil COMMAND test_archivedroputil)
+
 add_executable(test_gerberdifftrigger
     test_gerberdifftrigger.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/gerberdifftrigger.cpp

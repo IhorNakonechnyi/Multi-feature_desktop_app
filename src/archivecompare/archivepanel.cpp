@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 
 #include "../common/filepicker.h"
+#include "archivedroputil.h"
 #include "archivetreedelegate.h"
 #include "archivetreemodel.h"
 
@@ -112,18 +113,18 @@ void ArchivePanel::clearError()
 
 void ArchivePanel::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (event->mimeData()->hasUrls()) {
+    // Not accepting the action is what makes the OS show the no-drop
+    // cursor, so an invalid drag is refused before it is ever released.
+    if (!singleDroppedZipPath(event->mimeData()).isEmpty()) {
         event->acceptProposedAction();
     }
 }
 
 void ArchivePanel::dropEvent(QDropEvent *event)
 {
-    const auto urls = event->mimeData()->urls();
-    if (urls.isEmpty()) {
-        return;
-    }
-    const QString path = urls.first().toLocalFile();
+    // Re-validated rather than trusting dragEnter: the two events carry
+    // separate mime data, and the set of files can change between them.
+    const QString path = singleDroppedZipPath(event->mimeData());
     if (path.isEmpty()) {
         return;
     }

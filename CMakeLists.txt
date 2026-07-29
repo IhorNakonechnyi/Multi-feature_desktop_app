@@ -91,6 +91,7 @@ add_executable(PcbSupplierWorkflow
     src/archivecompare/archivetreemodel.cpp
     src/archivecompare/archivetreedelegate.h
     src/archivecompare/archivetreedelegate.cpp
+    src/archivecompare/archivedroputil.h
     src/archivecompare/archivepanel.h
     src/archivecompare/archivepanel.cpp
     src/archivecompare/gerberdifftrigger.h
