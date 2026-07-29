@@ -81,14 +81,20 @@ tool-modifier bug parsed the holes correctly — the layer reported the right ob
 while every hole referenced a tool with no aperture, so nothing drew. Object counts alone
 would never have caught it.
 
-## Review coverage — incomplete, stated honestly
+## Review coverage — complete
 
 - Tasks 1–10: each reviewed by a dispatched reviewer during execution.
-- Tasks 11–14: reviewed together (`93d0d28..a214d7c`). Verdict ready-to-merge, 0 Critical,
-  0 Important, 3 Minor — all addressed in `94c2d0c`.
-- **Tasks 15–19 and the two post-plan fixes (`bd329fa`, `0b82b05`) have had no independent
-  review.** They are backed by tests, mutation testing, the real-archive harness, and manual
-  gates — but no second pair of eyes. Merged to `main` in that state at Igor's explicit
-  request.
+- Tasks 11–14 (`93d0d28..a214d7c`): ready-to-merge, 0 Critical, 0 Important, 3 Minor — all
+  addressed in `94c2d0c`. Findings: a comment describing the wrong mechanism (the code was
+  right), a dead field, and a missing regression test for the real comparator output shape.
+- Tasks 15–19 plus both post-plan fixes (`a214d7c..0b82b05`): ready-to-merge, 0 Critical,
+  1 Important, 5 Minor — addressed in `0e39313`. The reviewer independently mutation-verified
+  all four load-bearing claims made during implementation; each broke exactly its named test
+  and nothing else.
 
-That review, if ever run, is `b7fa4d9..0b82b05`.
+The Important finding is worth recording, because it is a pattern rather than a one-off:
+`formatTypeCounts` had **no coverage at all**, while the counting logic feeding it was
+meticulously mutation-tested. The numbers were guarded; the sentence the user actually reads
+was not. Display formatting that encodes meaning — per-side labels, omitted-vs-zero
+fragments — deserves the same treatment as the arithmetic behind it. It has tests now, and
+they were themselves proved load-bearing by swapping the A/B labels.
