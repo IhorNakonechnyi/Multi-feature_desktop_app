@@ -99,9 +99,22 @@ ToolLine parseToolLine(const QString &line)
     ToolLine result;
     result.isToolLine = true;
     result.number = line.mid(1, numberEnd - 1).toInt();
-    if (numberEnd < line.length() && line.at(numberEnd) == QLatin1Char('C')) {
-        const int diameterEnd = nextFieldIndex(line, numberEnd + 1);
-        result.diameterText = line.mid(numberEnd + 1, diameterEnd - numberEnd - 1);
+
+    // A tool definition may carry optional modifiers before the diameter -
+    // feed rate (F) and spindle speed (S) are the common ones, and real
+    // files do write "T1F00S00C0.200". So walk the line's fields looking for
+    // C rather than assuming it comes first: reading only the position right
+    // after the tool number leaves such a tool with no diameter, and its
+    // holes then have no aperture, so the layer draws nothing at all while
+    // still reporting the right number of objects.
+    int fieldStart = numberEnd;
+    while (fieldStart < line.length()) {
+        const int fieldEnd = nextFieldIndex(line, fieldStart + 1);
+        if (line.at(fieldStart) == QLatin1Char('C')) {
+            result.diameterText = line.mid(fieldStart + 1, fieldEnd - fieldStart - 1);
+            break;
+        }
+        fieldStart = fieldEnd;
     }
     return result;
 }
