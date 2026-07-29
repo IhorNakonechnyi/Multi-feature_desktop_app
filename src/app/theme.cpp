@@ -28,7 +28,12 @@ QString themeStylesheet()
     rules << QString("ArchiveComparePage { background: %1; }").arg(Palette::FrameBackground);
     rules << QString("QLabel#pageTitle { color: %1; font-size: 15px; font-weight: 700; }")
                  .arg(Palette::SidebarTitleText);
-    rules << QString("ArchivePanel { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
+    // Header and tree are separate widgets since the Q8 split (the filter bar
+    // sits between them), so both need the card treatment - otherwise the
+    // header floats on the page background and the 1b "Elevated Panels" look
+    // survives on only half of each side.
+    rules << QString("ArchivePanel, ArchiveHeader { background: %1; border-radius: 8px; }")
+                 .arg(Palette::CardBackground);
     rules << QString("#treeCardHeader { border-bottom: 1px solid %1; }").arg(Palette::CardHeaderBorder);
     rules << QString("#pairsCard { background: %1; border-radius: 8px; }").arg(Palette::CardBackground);
     rules << QString("QListWidget#pairsList { background: transparent; border: none; outline: none; }");

@@ -7,8 +7,11 @@
 #include "../gerber/gerberobjectmodel.h"
 #include "archivecomparisonresult.h"
 
+class ArchiveHeader;
 class ArchivePanel;
 class CompositeView;
+class QCheckBox;
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QWidget;
@@ -30,13 +33,21 @@ public:
 private:
     void runComparison();
     void clearSummary();
+    void applyFilters();
     void updateNotDrawableLabel(int count);
     void showSelectedPair();
     void renderShownPair(const QRectF &windowMm, double pxPerMm);
     Layer parseGerberOrDrill(const QByteArray &bytes, QString &parseError);
 
+    ArchiveHeader *headerA_;
+    ArchiveHeader *headerB_;
     ArchivePanel *panelA_;
     ArchivePanel *panelB_;
+
+    // One bar for both panels, so it is unambiguous that it acts on both.
+    // Filter state lives here for the session only - never persisted.
+    QCheckBox *onlyChangesCheck_;
+    QComboBox *typeCombo_;
 
     // Full width under the page title, so they describe both panels at once
     // rather than appearing to belong to either side.

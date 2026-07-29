@@ -2,6 +2,9 @@
 
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -16,6 +19,7 @@
 #include "../gerber/layermaskrenderer.h"
 #include "../gerber/maskcompositor.h"
 #include "archivecomparison.h"
+#include "archiveheader.h"
 #include "archivepanel.h"
 #include "archivereader.h"
 #include "comparisonsummary.h"
@@ -143,12 +147,46 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 
     // A and B are symmetric slots - either archive may be loaded on either
     // side, so the labels name the slot, not an implied direction.
-    panelA_ = new ArchivePanel(tr("A"));
-    panelA_->setFixedWidth(252); // +20% over the original 210px
-    panelB_ = new ArchivePanel(tr("B"));
+    //
+    // Grid rather than two self-contained columns, because the filter bar
+    // has to span both: one bar acting on one tree would be ambiguous about
+    // whether the other tree is filtered too (Q8).
+    //
+    //   row 0:  headerA | headerB
+    //   row 1:  [ filter bar, spanning both ]
+    //   row 2:  panelA  | panelB
+    auto *archiveGrid = new QGridLayout;
+    archiveGrid->setSpacing(8);
+
+    headerA_ = new ArchiveHeader(tr("A"));
+    headerA_->setFixedWidth(252); // +20% over the original 210px
+    headerB_ = new ArchiveHeader(tr("B"));
+    headerB_->setFixedWidth(252);
+    panelA_ = new ArchivePanel;
+    panelA_->setFixedWidth(252);
+    panelB_ = new ArchivePanel;
     panelB_->setFixedWidth(252);
-    contentRow->addWidget(panelA_);
-    contentRow->addWidget(panelB_);
+
+    auto *controlBar = new QWidget;
+    auto *controlBarLayout = new QHBoxLayout(controlBar);
+    controlBarLayout->setContentsMargins(0, 0, 0, 0);
+    onlyChangesCheck_ = new QCheckBox(tr("Only changes"));
+    typeCombo_ = new QComboBox;
+    // -1 stands for "no kind filter"; the other two are DataKind values.
+    typeCombo_->addItem(tr("All types"), -1);
+    typeCombo_->addItem(tr("Gerber"), static_cast<int>(DataKind::GerberData));
+    typeCombo_->addItem(tr("Other"), static_cast<int>(DataKind::OtherData));
+    controlBarLayout->addWidget(onlyChangesCheck_);
+    controlBarLayout->addWidget(typeCombo_);
+    controlBarLayout->addStretch(1);
+
+    archiveGrid->addWidget(headerA_, 0, 0);
+    archiveGrid->addWidget(headerB_, 0, 1);
+    archiveGrid->addWidget(controlBar, 1, 0, 1, 2);
+    archiveGrid->addWidget(panelA_, 2, 0);
+    archiveGrid->addWidget(panelB_, 2, 1);
+    archiveGrid->setRowStretch(2, 1);
+    contentRow->addLayout(archiveGrid);
 
     auto *rightColumn = new QVBoxLayout;
     rightColumn->setSpacing(12);
@@ -227,8 +265,16 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     contentRow->addLayout(rightColumn, 1);
     layout->addLayout(contentRow, 1);
 
-    connect(panelA_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
-    connect(panelB_, &ArchivePanel::archiveChanged, this, &ArchiveComparePage::runComparison);
+    connect(headerA_, &ArchiveHeader::archiveChanged, this, &ArchiveComparePage::runComparison);
+    connect(headerB_, &ArchiveHeader::archiveChanged, this, &ArchiveComparePage::runComparison);
+    // A drop on a tree belongs to that side's header, which owns the path -
+    // the header then emits archiveChanged and the comparison re-runs, so a
+    // drop on either widget follows exactly one code path.
+    connect(panelA_, &ArchivePanel::archiveDropped, headerA_, &ArchiveHeader::setArchivePathFromDrop);
+    connect(panelB_, &ArchivePanel::archiveDropped, headerB_, &ArchiveHeader::setArchivePathFromDrop);
+
+    connect(onlyChangesCheck_, &QCheckBox::toggled, this, &ArchiveComparePage::applyFilters);
+    connect(typeCombo_, &QComboBox::currentIndexChanged, this, &ArchiveComparePage::applyFilters);
 
     connect(gerberPairList_, &QListWidget::currentRowChanged, this,
             [this](int row) { if (row >= 0) showSelectedPair(); });
@@ -252,9 +298,14 @@ void ArchiveComparePage::runComparison()
     clearSummary();
     panelA_->showEntries({});
     panelB_->showEntries({});
+    // Blank, not "no matching files" - nothing has been compared yet, so an
+    // empty-filter-result message would be answering a question the user
+    // hasn't asked.
+    panelA_->showEmptyMessage(QString());
+    panelB_->showEmptyMessage(QString());
 
-    const QString pathA = panelA_->archivePath();
-    const QString pathB = panelB_->archivePath();
+    const QString pathA = headerA_->archivePath();
+    const QString pathB = headerB_->archivePath();
     if (pathA.isEmpty() || pathB.isEmpty()) {
         return; // wait until both archives are picked
     }
@@ -268,14 +319,14 @@ void ArchiveComparePage::runComparison()
     ArchiveComparison::Outcome outcome = ArchiveComparison::compareArchives(pathA, pathB);
 
     if (!outcome.errorA.isEmpty()) {
-        panelA_->showError(outcome.errorA);
+        headerA_->showError(outcome.errorA);
     } else {
-        panelA_->clearError();
+        headerA_->clearError();
     }
     if (!outcome.errorB.isEmpty()) {
-        panelB_->showError(outcome.errorB);
+        headerB_->showError(outcome.errorB);
     } else {
-        panelB_->clearError();
+        headerB_->clearError();
     }
     if (!outcome.errorA.isEmpty() || !outcome.errorB.isEmpty()) {
         return; // can't produce a meaningful comparison with one side unreadable
@@ -288,10 +339,10 @@ void ArchiveComparePage::runComparison()
     // the first few lines. Declared here because both the summary's kind
     // resolution and the overlay's pair bucketing below use them.
     const auto readHeadA = [this](const QString &relativePath) {
-        return ArchiveReader::readEntryHead(panelA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+        return ArchiveReader::readEntryHead(headerA_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
     };
     const auto readHeadB = [this](const QString &relativePath) {
-        return ArchiveReader::readEntryHead(panelB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
+        return ArchiveReader::readEntryHead(headerB_->archivePath(), relativePath, GerberFileType::kClassifySniffBytes);
     };
 
     // Before showEntries, so the entries the panels receive already carry
@@ -317,6 +368,10 @@ void ArchiveComparePage::runComparison()
 
     panelA_->showEntries(outcome.result.entriesA);
     panelB_->showEntries(outcome.result.entriesB);
+    // Re-applied over the fresh entries: the bar keeps its state across a
+    // re-pick, so the trees must honour it immediately rather than showing
+    // everything until the user touches a control.
+    applyFilters();
     // The pipeline just ran to completion, so - unlike renderTimeLabel_
     // below - this IS the value to show, not a placeholder: rendering only
     // happens once the user selects a pair, but the compare itself is
@@ -351,6 +406,38 @@ void ArchiveComparePage::clearSummary()
     // the most misleading thing on the page.
     summaryLabel_->clear();
     identicalBanner_->setVisible(false);
+}
+
+void ArchiveComparePage::applyFilters()
+{
+    TreeFilter filter;
+    filter.changedOnly = onlyChangesCheck_->isChecked();
+    const int kindValue = typeCombo_->currentData().toInt();
+    if (kindValue >= 0) {
+        filter.kind = static_cast<DataKind>(kindValue);
+    }
+
+    // Both panels, always - one bar means one view of both archives. A bar
+    // that silently applied to only one side would make the two trees
+    // describe different questions.
+    panelA_->setFilter(filter);
+    panelB_->setFilter(filter);
+
+    // Names what was filtered out, rather than a bare "nothing here" - the
+    // user just chose these criteria, so the message should reflect them.
+    QString qualifier;
+    if (filter.changedOnly) {
+        qualifier += tr("changed ");
+    }
+    if (filter.kind == DataKind::GerberData) {
+        qualifier += tr("Gerber ");
+    } else if (filter.kind == DataKind::OtherData) {
+        qualifier += tr("other ");
+    }
+    const QString message = tr("No %1files to show").arg(qualifier);
+
+    panelA_->showEmptyMessage(panelA_->isEmptyAfterFilter() ? message : QString());
+    panelB_->showEmptyMessage(panelB_->isEmptyAfterFilter() ? message : QString());
 }
 
 void ArchiveComparePage::updateNotDrawableLabel(int count)
@@ -411,8 +498,8 @@ void ArchiveComparePage::showSelectedPair()
 
     bool foundA = false;
     bool foundB = false;
-    const QByteArray bytesA = ArchiveReader::readEntryBytes(panelA_->archivePath(), pair.relativePathA, &foundA);
-    const QByteArray bytesB = ArchiveReader::readEntryBytes(panelB_->archivePath(), pair.relativePathB, &foundB);
+    const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
+    const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
 
     QString parseErrorA;
     QString parseErrorB;
@@ -438,11 +525,11 @@ void ArchiveComparePage::showSelectedPair()
     if (!foundA) {
         pairStatusLabel_->setText(
             tr("Could not read \"%1\" from archive %2.")
-                .arg(pair.relativePathA, QFileInfo(panelA_->archivePath()).fileName()));
+                .arg(pair.relativePathA, QFileInfo(headerA_->archivePath()).fileName()));
     } else if (!foundB) {
         pairStatusLabel_->setText(
             tr("Could not read \"%1\" from archive %2.")
-                .arg(pair.relativePathB, QFileInfo(panelB_->archivePath()).fileName()));
+                .arg(pair.relativePathB, QFileInfo(headerB_->archivePath()).fileName()));
     } else if (!parseErrorA.isEmpty() && !parseErrorB.isEmpty()) {
         pairStatusLabel_->setText(tr("Both sides failed to parse - A: %1 | B: %2.").arg(parseErrorA, parseErrorB));
     } else if (!parseErrorA.isEmpty()) {

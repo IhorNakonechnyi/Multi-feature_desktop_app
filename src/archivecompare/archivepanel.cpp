@@ -2,59 +2,26 @@
 
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QFileInfo>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QMimeData>
-#include <QPushButton>
+#include <QStackedLayout>
 #include <QTreeView>
-#include <QVBoxLayout>
 
-#include "../common/filepicker.h"
 #include "archivedroputil.h"
 #include "archivetreedelegate.h"
 #include "archivetreemodel.h"
 
-ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
+ArchivePanel::ArchivePanel(QWidget *parent)
     : QWidget(parent)
-    , roleLabel_(roleLabel)
 {
     setAcceptDrops(true);
     setAttribute(Qt::WA_StyledBackground, true);
 
-    auto *layout = new QVBoxLayout(this);
-
-    auto *header = new QWidget;
-    header->setObjectName("treeCardHeader");
-    header->setAttribute(Qt::WA_StyledBackground, true);
-    auto *headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(10, 8, 10, 8);
-    fileNameLabel_ = new QLabel(tr("%1: (drop a .zip file here)").arg(roleLabel_));
-    fileNameLabel_->setWordWrap(true);
-    fileNameLabel_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    // Fixed at exactly 2 lines' height, regardless of the current text, so
-    // a long archive name that wraps in one panel doesn't push that
-    // panel's tree down relative to the other's - both trees always start
-    // at the same Y position because both labels reserve the same height.
-    fileNameLabel_->setFixedHeight(fileNameLabel_->fontMetrics().height() * 2);
-    changeButton_ = new QPushButton(tr("Change..."));
-    headerLayout->addWidget(fileNameLabel_, 1);
-    headerLayout->addWidget(changeButton_);
-
-    // Hidden until showError() sets it - inline replacement for the modal
-    // warning dialog this panel used to be notified via (Q7: errors are
-    // data, only display code shows anything).
-    errorLabel_ = new QLabel;
-    errorLabel_->setObjectName("detailLabel");
-    errorLabel_->setWordWrap(true);
-    errorLabel_->setVisible(false);
-
     treeView_ = new QTreeView;
     treeView_->setHeaderHidden(true);
     // Without this, the single column stretches to fill the viewport and a
-    // long file/folder name just gets clipped in place - there's nothing
-    // to scroll to because Qt never considers the column "wider than the
+    // long file/folder name just gets clipped in place - there's nothing to
+    // scroll to because Qt never considers the column "wider than the
     // viewport". Sizing the column to its actual content instead makes it
     // genuinely wider than the panel when names are long, which is what
     // makes the horizontal scrollbar appear and actually do something.
@@ -63,28 +30,19 @@ ArchivePanel::ArchivePanel(const QString &roleLabel, QWidget *parent)
     treeView_->setModel(model_);
     treeView_->setItemDelegate(new ArchiveTreeDelegate(treeView_));
 
-    layout->addWidget(header);
-    layout->addWidget(errorLabel_);
-    layout->addWidget(treeView_, 1);
+    emptyLabel_ = new QLabel;
+    emptyLabel_->setObjectName("detailLabel");
+    emptyLabel_->setAlignment(Qt::AlignCenter);
+    emptyLabel_->setWordWrap(true);
 
-    connect(changeButton_, &QPushButton::clicked, this, &ArchivePanel::pickArchive);
-}
-
-void ArchivePanel::pickArchive()
-{
-    const QString path = FilePicker::pickFile(this, tr("Select %1 archive").arg(roleLabel_),
-                                               tr("Zip archives (*.zip)"));
-    if (path.isEmpty()) {
-        return;
-    }
-    setArchivePath(path);
-}
-
-void ArchivePanel::setArchivePath(const QString &path)
-{
-    archivePath_ = path;
-    fileNameLabel_->setText(tr("%1: %2").arg(roleLabel_, QFileInfo(path).fileName()));
-    emit archiveChanged(path);
+    // A stack rather than hiding/showing widgets in a box layout: the tree
+    // and the message occupy the same space, so the panel never changes size
+    // when one replaces the other.
+    stack_ = new QStackedLayout(this);
+    stack_->setContentsMargins(0, 0, 0, 0);
+    stack_->addWidget(treeView_);  // index 0
+    stack_->addWidget(emptyLabel_); // index 1
+    stack_->setCurrentIndex(0);
 }
 
 void ArchivePanel::showEntries(const QVector<ArchiveEntry> &entries)
@@ -96,25 +54,30 @@ void ArchivePanel::showEntries(const QVector<ArchiveEntry> &entries)
     treeView_->resizeColumnToContents(0);
 }
 
-void ArchivePanel::showError(const QString &message)
+void ArchivePanel::setFilter(const TreeFilter &filter)
 {
-    errorLabel_->setText(message);
-    errorLabel_->setVisible(true);
-    // An error means this archive produced no usable entries this run - a
-    // tree left over from the last successful read would sit there looking
-    // current while actually describing a stale selection.
-    model_->buildFrom({});
+    model_->setFilter(filter);
+    treeView_->expandAll();
+    treeView_->resizeColumnToContents(0);
 }
 
-void ArchivePanel::clearError()
+bool ArchivePanel::isEmptyAfterFilter() const
 {
-    errorLabel_->setVisible(false);
+    return model_->isEmptyAfterFilter();
+}
+
+void ArchivePanel::showEmptyMessage(const QString &message)
+{
+    if (message.isEmpty()) {
+        stack_->setCurrentIndex(0);
+        return;
+    }
+    emptyLabel_->setText(message);
+    stack_->setCurrentIndex(1);
 }
 
 void ArchivePanel::dragEnterEvent(QDragEnterEvent *event)
 {
-    // Not accepting the action is what makes the OS show the no-drop
-    // cursor, so an invalid drag is refused before it is ever released.
     if (!singleDroppedZipPath(event->mimeData()).isEmpty()) {
         event->acceptProposedAction();
     }
@@ -122,11 +85,9 @@ void ArchivePanel::dragEnterEvent(QDragEnterEvent *event)
 
 void ArchivePanel::dropEvent(QDropEvent *event)
 {
-    // Re-validated rather than trusting dragEnter: the two events carry
-    // separate mime data, and the set of files can change between them.
     const QString path = singleDroppedZipPath(event->mimeData());
     if (path.isEmpty()) {
         return;
     }
-    setArchivePath(path);
+    emit archiveDropped(path);
 }
