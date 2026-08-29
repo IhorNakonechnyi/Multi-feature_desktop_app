@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-The app is built and running: Qt 6.8.2 Widgets, CMake, C++20, MSVC 2022 x64, with 17 `ctest`
+The app is built and running: Qt 6.8.2 Widgets, CMake, C++20, MSVC 2022 x64, with 18 `ctest`
 targets. `src/` is organised by feature area:
 
 - `src/app/` — shell: `MainWindow`, sidebar nav, status legend, `theme.cpp` (the single
@@ -14,9 +14,14 @@ targets. `src/` is organised by feature area:
 - `src/gerber/` — hand-rolled RS-274X + Excellon parsers, the integer-nm object model, and
   the mask renderer/compositor that draw the overlay.
 - `src/common/` — file picker, local settings.
-- `src/supplieradvisor/`, `src/quotecompare/` — **not built into the app yet**; their sidebar
-  entries are deliberately disabled. Supplier Advisor's real implementation lives unmerged in
-  the archived `.claude/worktrees/old/supplier-advisor-first-slice` worktree.
+- The three other feature areas (Supplier Advisor, Quote Compare, and the standalone
+  Gerber viewer page) were **removed from the app in v1.8.0**. They were visible-but-
+  disabled sidebar entries whose pages rendered "coming in a later release", and the
+  release to the IT department had to contain no references to unbuilt features. The
+  work is not lost: Supplier Advisor's real implementation is still in the archived
+  `.claude/worktrees/old/supplier-advisor-first-slice` worktree, and the deleted files
+  remain in git history. The Gerber *engine* under `src/gerber/` stays - Archive
+  Compare drives it directly; only the standalone viewer page went.
 
 Design records live in `docs/superpowers/specs/` (how something works and why) and
 `docs/superpowers/plans/` (the task breakdown that built it). Read the relevant design doc
@@ -102,15 +107,15 @@ Six governing principles from `.specify/memory/constitution.md`:
 
 Set by feature `001`'s `plan.md`/`research.md` (gitignored, local-only — summarised here
 since the tech stack itself isn't confidential, only the business data structure is). Every
-point below is **implemented**, except QXlsx and `QPdfDocument`, which belong to the unbuilt
-Supplier Advisor:
+point below is **implemented**, except QXlsx, which belongs to the unbuilt Supplier
+Advisor:
 
 - Qt 6.8.2 (MSVC 2022 x64, Qt Widgets, not QML), CMake, C++20. Windows 10/11 only.
 - Dependencies via CMake `FetchContent`:
   - **QuaZip — LGPL license.** Build as its own shared DLL and dynamically link; do not statically link (avoids LGPL relink obligations). Used for zip reading/CRC comparison.
   - **QXlsx — MIT license.** Used for reading supplier-capability Excel files.
 - **No third-party Gerber-parsing library** — hand-rolled minimal RS-274X (Gerber) / Excellon (drill) parser. Existing options such as gerbv are GPL-licensed, incompatible with this public repo.
-- **Qt's own PDF module (`QPdfDocument`)** for extracting text from the Salesforce-exported spec PDF. This module isn't always enabled by default in every Qt installation — verify "Qt PDF" is checked in the Qt Maintenance Tool for this kit before first build.
+- **No Qt PDF module.** `Qt6::Pdf` was linked until v1.8.0 for a planned spec-PDF reader. Nothing in `src/` ever used it, but it transitively pulled `Qt6Network.dll`, a `tls/` plugin directory and `networkinformation/` into the deployed folder — directly contradicting the zero-network claim made to reviewers. It was removed. `tests/unit/test_nonetworkdependency.cpp` now inspects the built executable and fails if any networking library reappears, so re-adding Qt PDF for Supplier Advisor means re-opening that question deliberately rather than by accident.
 - **QtTest** (ships with Qt, `ctest`-integrated) for unit tests — core logic only, per constitution principle 4.
 - **Distribution**: `windeployqt`-produced folder (exe + Qt/QuaZip DLLs), zipped and shared — not an installer, not a statically-linked single file.
 - The app makes **zero outbound network calls**; all input is local files (archives, spec PDF, supplier Excel files) selected via a file picker defaulting to the user's Downloads folder.

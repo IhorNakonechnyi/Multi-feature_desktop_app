@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PcbSupplierWorkflow LANGUAGES CXX)
+project(PcbSupplierWorkflow VERSION 1.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Pdf Svg Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Test)
 
 qt_standard_project_setup()
 
@@ -61,7 +61,7 @@ set(QUAZIP_INSTALL OFF CACHE BOOL "" FORCE)
 set(QUAZIP_ENABLE_QTEXTCODEC OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(quazip)
 
-add_executable(PcbSupplierWorkflow
+add_executable(PcbSupplierWorkflow WIN32
     src/main.cpp
     src/app/mainwindow.h
     src/app/mainwindow.cpp
@@ -76,8 +76,6 @@ add_executable(PcbSupplierWorkflow
     src/common/localsettings.cpp
     src/common/filepicker.h
     src/common/filepicker.cpp
-    src/common/inetworkservice.h
-    src/common/inetworkservice.cpp
     src/archivecompare/archivecomparepage.h
     src/archivecompare/archivecomparepage.cpp
     src/archivecompare/archivecomparisonresult.h
@@ -100,10 +98,6 @@ add_executable(PcbSupplierWorkflow
     src/archivecompare/archivepanel.cpp
     src/archivecompare/gerberdifftrigger.h
     src/archivecompare/gerberdifftrigger.cpp
-    src/supplieradvisor/supplieradvisorpage.h
-    src/supplieradvisor/supplieradvisorpage.cpp
-    src/gerber/gerberviewerpage.h
-    src/gerber/gerberviewerpage.cpp
     src/gerber/gerberfiletype.h
     src/gerber/gerberfiletype.cpp
     src/gerber/gerberdiffrenderer.h
@@ -130,8 +124,6 @@ add_executable(PcbSupplierWorkflow
     src/gerber/maskcompositor.cpp
     src/gerber/compositeview.h
     src/gerber/compositeview.cpp
-    src/quotecompare/quotecomparepage.h
-    src/quotecompare/quotecomparepage.cpp
     resources/resources.qrc
     resources/app.rc
 )
@@ -142,7 +134,6 @@ target_link_libraries(PcbSupplierWorkflow PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-    Qt6::Pdf
     QuaZip::QuaZip
 )
 

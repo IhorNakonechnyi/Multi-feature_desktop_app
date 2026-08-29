@@ -161,3 +161,16 @@ add_executable(test_excellonparser
 target_include_directories(test_excellonparser PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_excellonparser PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_excellonparser COMMAND test_excellonparser)
+
+# Inspects the BUILT EXECUTABLE, not the source, for any linked networking
+# library - see the test file's own header for why a source grep is not
+# sufficient (Qt6::Pdf once pulled Qt6Network.dll in transitively without a
+# single reference in src/). add_dependencies, because it can only inspect
+# the application binary once that binary exists.
+add_executable(test_nonetworkdependency
+    test_nonetworkdependency.cpp
+)
+target_include_directories(test_nonetworkdependency PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_nonetworkdependency PRIVATE Qt6::Core Qt6::Test)
+add_dependencies(test_nonetworkdependency PcbSupplierWorkflow)
+add_test(NAME test_nonetworkdependency COMMAND test_nonetworkdependency)

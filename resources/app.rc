@@ -1,5 +1,57 @@
-// Windows resource file: sets the icon shown for the .exe itself (File
-// Explorer, taskbar before the window's own icon is set, Alt-Tab). The
-// first ICON statement in a Windows .rc file becomes the executable's
-// default icon - this file exists solely for that one line.
+// Windows resource file.
+//
+// 1. Sets the icon shown for the .exe itself (File Explorer, taskbar before
+//    the window's own icon is set, Alt-Tab). The first ICON statement in a
+//    Windows .rc file becomes the executable's default icon.
+// 2. Supplies the VERSIONINFO block that populates the Details tab of the
+//    file's Properties dialog. Without it those fields are blank, which
+//    looks like an unfinished or repackaged binary to anyone reviewing the
+//    file before deployment.
+//
+// The version below is duplicated from project(... VERSION) in
+// CMakeLists.txt and must be kept in step with it by hand. Releases here are
+// manual and infrequent, so a generated .rc was judged more machinery than
+// the drift risk warrants - but if you bump one, bump the other.
+
 IDI_MAIN_ICON ICON "icons/icon.ico"
+
+// Numeric literals throughout, so this file does not need to
+// #include <windows.h> just to resolve five names:
+//   1             = VS_VERSION_INFO, the resource ID Windows looks version
+//                   info up by. It MUST be the numeric 1 - writing the name
+//                   VS_VERSION_INFO without the header creates a resource
+//                   called "VS_VERSION_INFO" instead, which still embeds
+//                   cleanly and is then silently invisible to Explorer and
+//                   to GetFileVersionInfo. That mistake was made here once.
+//   FILEFLAGSMASK 0x3f    = VS_FFI_FILEFLAGSMASK
+//   FILEOS        0x40004 = VOS_NT_WINDOWS32
+//   FILETYPE      0x1     = VFT_APP
+1 VERSIONINFO
+FILEVERSION 1,8,0,0
+PRODUCTVERSION 1,8,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // 0409 = US English, 04b0 = Unicode codepage 1200.
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "Ihor Nakonechnyi"
+            VALUE "FileDescription",  "PCB Gadget - compares two archives of PCB manufacturing data"
+            VALUE "FileVersion",      "1.8.0.0"
+            VALUE "InternalName",     "PcbSupplierWorkflow"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Ihor Nakonechnyi. MIT licensed."
+            VALUE "OriginalFilename", "PcbSupplierWorkflow.exe"
+            VALUE "ProductName",      "PCB Gadget"
+            VALUE "ProductVersion",   "1.8.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

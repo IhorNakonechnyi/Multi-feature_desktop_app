@@ -10,9 +10,6 @@
 #include "statuslegend.h"
 #include "../archivecompare/archivecomparepage.h"
 #include "../common/palette.h"
-#include "../gerber/gerberviewerpage.h"
-#include "../quotecompare/quotecomparepage.h"
-#include "../supplieradvisor/supplieradvisorpage.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -47,9 +44,6 @@ MainWindow::MainWindow(QWidget *parent)
     // Order must match SidebarNav's item order - currentRowChanged drives
     // setCurrentIndex directly, no separate mapping needed.
     pages_->addWidget(new ArchiveComparePage);
-    pages_->addWidget(new SupplierAdvisorPage);
-    pages_->addWidget(new GerberViewerPage);
-    pages_->addWidget(new QuoteComparePage);
 
     splitter->setStretchFactor(0, 0); // sidebar: fixed
     splitter->setStretchFactor(1, 1); // content: grows
@@ -66,10 +60,8 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::updateStatusLegend(int pageIndex)
 {
-    // Only Archive Compare (index 0) has a comparison concept today; the
-    // other 3 pages are still stub "coming later" pages (see
-    // supplieradvisorpage.cpp / gerberviewerpage.cpp / quotecomparepage.cpp)
-    // with nothing meaningful to show yet - setEntries({}) hides the card.
+    // Archive Compare (index 0) is the only page today. setEntries({}) hides
+    // the card for any other index.
     // Colors are the same Palette calls ArchiveTreeDelegate already uses,
     // so the legend can never drift out of sync with the tree's colors.
     if (pageIndex == 0) {

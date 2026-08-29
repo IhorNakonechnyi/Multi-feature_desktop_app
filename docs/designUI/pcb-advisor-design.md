@@ -229,7 +229,19 @@ correct — they don't block each other.
 
 ---
 
-## 8. Deferred networked features — design now, wire in later
+## 8. Deferred networked features - ABANDONED (2026-08-29)
+
+> **Superseded. This section describes a direction that was considered and then
+> dropped; it does not describe the application.**
+>
+> No networking was ever implemented. The `INetworkService` seam sketched below
+> was added as an empty marker class, never wired to anything, and was deleted
+> outright in v1.8.0 along with every other reference to unbuilt features. The
+> application makes no network calls of any kind and none are planned - see
+> `docs/privacy-verification.md`.
+>
+> The text below is kept only as a record of a rejected design. Treat every
+> statement in it as historical.
 
 Don't skip designing these just because they're deferred — stub the seam now
 so adding them doesn't require touching unrelated code:
@@ -255,14 +267,15 @@ outbound calls — zero UI or business-logic changes required.
 
 ## 9. Distribution
 
-- Build with **static Qt** (or bundle via `windeployqt`) to avoid DLL-hell on
-  colleagues' machines.
+- Build with `windeployqt` into a self-contained folder. Static Qt was
+  rejected: Qt and QuaZip are LGPL, and static linking would trigger relink
+  obligations that the dynamic-DLL layout avoids. See `licenses/NOTICE.md`.
 - Ship as a single `.exe` (+ any plugin DLLs like archive backends) to the
   internal file server. No installer needed for a simple portfolio-grade
   internal tool unless you want Start Menu integration later.
 - Since it's zero-network by design, there's no firewall/proxy config to
-  worry about — worth stating explicitly in the app's "About" box for
-  colleagues' peace of mind.
+  worry about. No "About" box was ever built; this is stated in `README.md`
+  and `docs/privacy-verification.md` instead.
 - Code-signing is optional but would further reduce SmartScreen friction if
   it ever comes up as an issue via the file-server route.
 
