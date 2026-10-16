@@ -64,7 +64,7 @@ built executable rather than any source file; see step 5 for why that matters.
 ## 4. Assemble a clean package folder
 
 ```powershell
-$dist = "build-dist\PcbSupplierWorkflow-1.8.0-win64"
+$dist = "build-dist\PcbSupplierWorkflow-1.8.5-win64"
 Remove-Item build-dist -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 Copy-Item build-release\Release\PcbSupplierWorkflow.exe $dist
@@ -146,8 +146,8 @@ theme is dark, and a real comparison of two archives works end to end.
 ## 8. Zip and hash
 
 ```powershell
-Compress-Archive -Path $dist -DestinationPath "build-dist\PcbSupplierWorkflow-1.8.0-win64.zip" -Force
-Get-FileHash "build-dist\PcbSupplierWorkflow-1.8.0-win64.zip" -Algorithm SHA256
+Compress-Archive -Path $dist -DestinationPath "build-dist\PcbSupplierWorkflow-1.8.5-win64.zip" -Force
+Get-FileHash "build-dist\PcbSupplierWorkflow-1.8.5-win64.zip" -Algorithm SHA256
 ```
 
 Record the hash. Send it to recipients **in the message body**, separately from
@@ -160,7 +160,7 @@ share the link, and include the SHA-256 and a note that the executable is not
 code-signed so Windows SmartScreen will warn on first run.
 
 If you are tagging the release in git, tag by name rather than pushing all
-tags — `git push origin v1.8.0`, not `git push --tags`. There are local-only
+tags — `git push origin v1.8.5`, not `git push --tags`. There are local-only
 tags in this repository that are not meant to be published.
 
 ---

@@ -1,6 +1,6 @@
 # Privacy and network verification
 
-**Application:** PCB Gadget (`PcbSupplierWorkflow.exe`), version 1.8.0
+**Application:** PCB Gadget (`PcbSupplierWorkflow.exe`), version 1.8.5
 **Platform:** Windows 10/11, 64-bit
 **Audience:** anyone reviewing this application before deployment
 
@@ -196,7 +196,7 @@ downloaded rather than copied from a network share.
 Verify the package integrity against the SHA-256 published alongside it:
 
 ```powershell
-Get-FileHash PcbSupplierWorkflow-1.8.0-win64.zip -Algorithm SHA256
+Get-FileHash PcbSupplierWorkflow-1.8.5-win64.zip -Algorithm SHA256
 ```
 
 ## 7. Third-party components
