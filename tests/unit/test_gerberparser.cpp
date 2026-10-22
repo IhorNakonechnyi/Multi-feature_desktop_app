@@ -47,6 +47,7 @@ private slots:
     void multiQuadrantArcWithEqualEndpointsIsAFullCircle();
     void singleQuadrantArcResolvesUnsignedCenterOffsets();
     void macroBodyStopsAtApertureAttribute();
+    void macroClosedOnItsOwnLineKeepsItsPrimitive();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -899,6 +900,20 @@ void TestGerberParser::macroBodyStopsAtApertureAttribute()
     const Layer layer = GerberParser::parseContentToObjects(content);
     QVERIFY(layer.macros.contains("BOX"));
     QCOMPARE(layer.macros.value("BOX").statements, QStringList({"21,1,$1,$2,0,0,0"}));
+}
+
+void TestGerberParser::macroClosedOnItsOwnLineKeepsItsPrimitive()
+{
+    // The closing '%' on its own line leaves an empty statement after the
+    // last '*'. It ends the macro body but adds nothing to it.
+    const QString content = "%FSLAX46Y46*%\n%MOMM*%\n"
+                            "%AMOC8*\n5,1,8,0,0,1.08239X$1,22.5*\n%\n"
+                            "%ADD10OC8,0.5*%\n"
+                            "D10*\nX0Y0D03*\nM02*\n";
+    const Layer layer = GerberParser::parseContentToObjects(content);
+    QVERIFY(layer.macros.contains("OC8"));
+    QCOMPARE(layer.macros.value("OC8").statements, QStringList({"5,1,8,0,0,1.08239X$1,22.5"}));
+    QCOMPARE(layer.objects.size(), 1);
 }
 
 QTEST_MAIN(TestGerberParser)

@@ -39,9 +39,16 @@ struct GerberStatement {
 // pulled in via gerberparser.h) rather than being re-declared here, since
 // each emitted GraphicObject carries its own polarity.
 
-QVector<GerberStatement> tokenize(const QString &content)
+// `truncated` (optional) is set to true when the scan stops early at an
+// unterminated '%...' block or a last command with no '*' - the text from
+// there on is dropped. The parser ignores that tail, so the same-data check
+// asks for this flag: a dropped tail is a part of the file nobody compared.
+QVector<GerberStatement> tokenize(const QString &content, bool *truncated = nullptr)
 {
     QVector<GerberStatement> statements;
+    if (truncated) {
+        *truncated = false;
+    }
     int i = 0;
     while (i < content.length()) {
         // Skip whitespace between statements before deciding what the next
@@ -58,7 +65,12 @@ QVector<GerberStatement> tokenize(const QString &content)
         if (content.at(i) == QLatin1Char('%')) {
             const int blockEnd = content.indexOf(QLatin1Char('%'), i + 1);
             if (blockEnd < 0) {
-                break; // malformed - unterminated parameter block, stop parsing
+                // malformed - unterminated parameter block, stop parsing.
+                // (Whitespace was skipped above, so real text is dropped.)
+                if (truncated) {
+                    *truncated = true;
+                }
+                break;
             }
             const QString block = content.mid(i + 1, blockEnd - i - 1);
             const QStringList parts = block.split(QLatin1Char('*'), Qt::SkipEmptyParts);
@@ -69,6 +81,10 @@ QVector<GerberStatement> tokenize(const QString &content)
         } else {
             const int commandEnd = content.indexOf(QLatin1Char('*'), i);
             if (commandEnd < 0) {
+                // A last command with no '*': it is never read.
+                if (truncated) {
+                    *truncated = true;
+                }
                 break;
             }
             const QString command = content.mid(i, commandEnd - i).trimmed();
@@ -1071,11 +1087,43 @@ QPainterPath GerberParser::parseContent(const QString &content)
 
 std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content)
 {
+    // A file whose last statement is cut off (an unterminated '%...' block,
+    // or a final command with no '*') loses that tail in the parser without
+    // a trace, so the tail is compared nowhere - refuse.
+    bool truncated = false;
+    const QVector<GerberStatement> statements = tokenize(content, &truncated);
+    if (truncated) {
+        return std::nullopt;
+    }
+
     QStringList kept;
     QSet<QString> macroNames; // macro names already defined in this file
+    QSet<int> apertureCodes;  // aperture D-codes already defined in this file
     bool inMacro = false; // true while the statements after a %AM header are its body
     GeometryWalk walk;    // parser state the plain-statement forms depend on
-    for (const GerberStatement &statement : tokenize(content)) {
+
+    // Unit switches (see the unit rule below). The parser applies the
+    // file's LAST unit to every macro aperture, whenever it was defined.
+    bool apertureOrGeometrySeen = false;
+    std::optional<bool> declaredInches; // the unit the file declared last, if any
+    // Returns false when this unit directive switches away from a unit the
+    // file already declared, after an aperture or geometry has been read.
+    // Such a file means different sizes before and after the switch, but
+    // the parser scales macro apertures with the final unit only - and
+    // where the switch sits relative to the apertures is not compared
+    // (%AD and geometry are not in the text list). The first declaration
+    // is allowed anywhere: the parser treats it as the unit of the whole
+    // file for macros, and a standard aperture read before it is compared
+    // through its scaled size anyway. Repeating the same unit is harmless.
+    const auto acceptUnit = [&](bool inches) {
+        if (apertureOrGeometrySeen && declaredInches.has_value() && *declaredInches != inches) {
+            return false;
+        }
+        declaredInches = inches;
+        return true;
+    };
+
+    for (const GerberStatement &statement : statements) {
         const QString &text = statement.text;
         // A macro body runs from the %AM header to the first statement of
         // any kind that does not look like a body line (same test the parser
@@ -1084,13 +1132,39 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             inMacro = false;
         }
         if (statement.isParameterStatement) {
+            // An empty statement: a '%' block whose closing '%' sits on its
+            // own line after the last '*' (common for %AM). The parser
+            // ignores it - it only ends a macro body, which the reset just
+            // above has done too - so it says nothing and is skipped.
+            if (text.isEmpty()) {
+                continue;
+            }
 
             // Group 1 - SKIP: directives that cannot change the image, or
             // that are compared some other way.
             // %AD is compared through the objects (by aperture shape, not by
-            // its D-number). X2 attributes are skipped only if they are
-            // export noise.
-            if (text.startsWith(QLatin1String("AD")) || ExportNoise::isVolatileAttribute(text)) {
+            // its D-number).
+            if (text.startsWith(QLatin1String("AD"))) {
+                // The parser keeps only the last definition of a D-code and
+                // the objects store just the code, so a redefinition hides
+                // which size an earlier flash or draw was made with - refuse
+                // (same reason as the macro-name rule below). The code is
+                // read exactly as parseApertureDefinition reads it: the
+                // digits after "ADD", so "ADD010" and "ADD10" are one code.
+                int codeEnd = 3;
+                while (codeEnd < text.length() && text.at(codeEnd).isDigit()) {
+                    ++codeEnd;
+                }
+                const int code = text.mid(3, codeEnd - 3).toInt();
+                if (apertureCodes.contains(code)) {
+                    return std::nullopt;
+                }
+                apertureCodes.insert(code);
+                apertureOrGeometrySeen = true;
+                continue;
+            }
+            // X2 attributes are skipped only if they are export noise.
+            if (ExportNoise::isVolatileAttribute(text)) {
                 continue;
             }
             // %TF.FilePolarity,Positive is the Gerber default, so stating it
@@ -1159,13 +1233,35 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             // Only the unit and polarity codes the parser knows; an unknown
             // code under these prefixes is not understood, so it falls
             // through to the refuse group.
-            if (text == QLatin1String("MOIN") || text == QLatin1String("MOMM")
-                || text == QLatin1String("LPD") || text == QLatin1String("LPC")) {
+            if (text == QLatin1String("MOIN") || text == QLatin1String("MOMM")) {
+                if (!acceptUnit(text == QLatin1String("MOIN"))) {
+                    return std::nullopt;
+                }
                 kept << QLatin1Char('%') + text;
                 continue;
             }
-            if (text.startsWith(QLatin1String("SR")) || text.startsWith(QLatin1String("TF"))
-                || text.startsWith(QLatin1String("TA"))) {
+            if (text == QLatin1String("LPD") || text == QLatin1String("LPC")) {
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            // %SR is kept only in the two forms parseStepRepeatDirective
+            // reads correctly: a bare "SR" (end of the block), or
+            // X<count>Y<count>I<step>J<step> in exactly that order. It reads
+            // the counts with toInt, so a misordered or missing field, a 0,
+            // or a count too long for an int gives a count of 0 - and then
+            // every object inside the block silently vanishes from both
+            // files, so a change there could never show. Anything else refuses.
+            if (text.startsWith(QLatin1String("SR"))) {
+                static const QRegularExpression stepRepeatForm(
+                    QStringLiteral("^SRX[1-9]\\d{0,8}Y[1-9]\\d{0,8}I%1J%1$")
+                        .arg(QStringLiteral("[+-]?(?:\\d+\\.?\\d*|\\.\\d+)")));
+                if (text != QLatin1String("SR") && !stepRepeatForm.match(text).hasMatch()) {
+                    return std::nullopt;
+                }
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            if (text.startsWith(QLatin1String("TF")) || text.startsWith(QLatin1String("TA"))) {
                 kept << QLatin1Char('%') + text;
                 continue;
             }
@@ -1196,11 +1292,20 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         if (plain.contains(QLatin1String("G91"))) {
             return std::nullopt;
         }
+        // G70 (inches) / G71 (mm): the old spelling of %MO, read by the
+        // parser with the same startsWith test. Same unit rule as %MO; the
+        // statement itself is still kept as text below.
+        if (plain.startsWith(QLatin1String("G70")) || plain.startsWith(QLatin1String("G71"))) {
+            if (!acceptUnit(plain.startsWith(QLatin1String("G70")))) {
+                return std::nullopt;
+            }
+        }
         // Geometry (a draw, move, flash or aperture select) is left out only
         // in the forms the parser fully reads into objects; everything else
         // (G01/G36/G75/G90/M02, odd coordinate forms ...) is kept in order.
         switch (classifyPlain(plain, walk)) {
         case PlainVerdict::Geometry:
+            apertureOrGeometrySeen = true;
             break;
         case PlainVerdict::KeepAsText:
             kept << plain;

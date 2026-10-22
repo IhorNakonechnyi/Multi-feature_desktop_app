@@ -53,7 +53,9 @@ QPainterPath parseContent(const QString &content);
 //
 // Unknown means no answer: any other % directive (%LR, %LM, %SF, %IPNEG, a
 // stray primitive outside %AM, ...) and G91 (incremental coordinates) make
-// the result std::nullopt. So does a region whose outline the parser cannot
+// the result std::nullopt. So do a %SR in a form the parser misreads, an
+// aperture or macro defined twice, a unit switch after apertures or geometry,
+// and a file cut off mid-statement. So does a region whose outline the parser cannot
 // record exactly (a second outline after a D02, a start that is not a D02
 // move, a flash, an unreadable statement, fewer than 3 vertices, no G37).
 // The parser ignores or does not read these, and

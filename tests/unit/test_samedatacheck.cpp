@@ -128,6 +128,15 @@ private slots:
     void regionTooSmallToBeDrawnIsNeverSameData();
     void arcWithXButNoYIsText();
     void modeSetWithOnlyArcOffsetsIsText();
+    void bareCoordinatesAfterApertureCodeMoveAreText();
+
+    // Gerber: directives the parser reads in a way that can hide a difference
+    void macroClosedOnItsOwnLineIsSameData();
+    void malformedStepRepeatIsNeverSameData();
+    void validStepRepeatIsSameData();
+    void redefinedApertureIsNeverSameData();
+    void truncatedFileIsNeverSameData();
+    void unitSwitchAfterAperturesIsNeverSameData();
 
     // Excellon
     void drillReexportWithNewJobUserDateIsSameData();
@@ -593,6 +602,65 @@ void TestSameDataCheck::modeSetWithOnlyArcOffsetsIsText()
     // are not read.
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX0Y0D03*\nG02I100J0*\nG01*\n"),
                                        gerber(kExportB, "D10*\nX0Y0D03*\nG02I200J0*\nG01*\n")));
+}
+
+void TestSameDataCheck::bareCoordinatesAfterApertureCodeMoveAreText()
+{
+    // After "X..D10" the parser's modal operation is 10, so the bare line
+    // that follows only moves the pen and draws nothing. It must stay text,
+    // or a moved line would look like no change at all.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX1000000Y0D10*\nX2000000Y0*\nX0Y0D03*\n"),
+                                       gerber(kExportB, "D10*\nX1000000Y0D10*\nX3000000Y0*\nX0Y0D03*\n")));
+}
+
+void TestSameDataCheck::macroClosedOnItsOwnLineIsSameData()
+{
+    // Some tools close a %AM block with a '%' on its own line. The bit
+    // between the last '*' and that '%' is an empty statement, which the
+    // parser ignores - it must not make the file unreadable for the check.
+    const QString body = "%AMOC8*\n5,1,8,0,0,1.08239X$1,22.5*\n%\n%ADD20OC8,0.5*%\nD20*\nX0Y0D03*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, body), gerber(kExportB, body)));
+}
+
+void TestSameDataCheck::malformedStepRepeatIsNeverSameData()
+{
+    // Y before X: the parser reads a repeat count of 0 and draws nothing
+    // inside the block, so the flash in it vanishes from both files.
+    const QString body = "D10*\nX1000000Y1000000D03*\n%SRY2X2I1.0J1.0*%\nX%1Y0D03*\n%SR*%\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, body.arg("0")), gerber(kExportB, body.arg("5000000"))));
+}
+
+void TestSameDataCheck::validStepRepeatIsSameData()
+{
+    const QString body = "%SRX2Y2I1.0J1.0*%\nD10*\nX0Y0D03*\n%SR*%\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, body), gerber(kExportB, body)));
+}
+
+void TestSameDataCheck::redefinedApertureIsNeverSameData()
+{
+    // The parser keeps only the last definition of D20, so A's first flash
+    // is drawn 0.5 wide although the file declared it 0.2 at that point.
+    const QString a = "%ADD20C,0.2*%\nD20*\nX0Y0D03*\n%ADD20C,0.5*%\nD20*\nX1000000Y0D03*\n";
+    const QString b = "%ADD20C,0.5*%\nD20*\nX0Y0D03*\nX1000000Y0D03*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, a), gerber(kExportB, b)));
+}
+
+void TestSameDataCheck::truncatedFileIsNeverSameData()
+{
+    // The last command has no '*', so the parser never reads it.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA) + "X1000000Y0D03", gerber(kExportB) + "X2000000Y0D03"));
+}
+
+void TestSameDataCheck::unitSwitchAfterAperturesIsNeverSameData()
+{
+    // The helper declares mm before its apertures; switching to inches
+    // afterwards rescales macro apertures for the whole file, and where the
+    // switch sits relative to the apertures is not compared.
+    for (const QString &unitSwitch : {"%MOIN*%\n", "G70*\n"}) {
+        const QString body = unitSwitch + "D10*\nX1000000Y1000000D03*\n";
+        QVERIFY2(!SameDataCheck::isSameData(gerber(kExportA, body), gerber(kExportB, body)),
+                 qPrintable(unitSwitch));
+    }
 }
 
 void TestSameDataCheck::drillReexportWithNewJobUserDateIsSameData()
