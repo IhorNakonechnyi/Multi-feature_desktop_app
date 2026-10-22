@@ -210,7 +210,9 @@ Summary summarize(const ArchiveComparisonResult &result)
 
     // A pair the same-data check moved back to green is, for the user, one
     // more identical thing - its CRCs differ, so the class walk above never
-    // saw it as identical. Only Gerber/drill pairs can get here.
+    // saw it as identical. Only Gerber/drill pairs can get here. Pairs join
+    // class representatives and the collapse is one-to-one, so this counts
+    // exactly the classes that turned green on each side.
     summary.gerber.identicalClasses += result.sameDataPairs.size();
 
     return summary;

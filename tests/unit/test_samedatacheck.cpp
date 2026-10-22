@@ -145,7 +145,13 @@ private slots:
     // Pair collapse and summary
     void sameDataPairTurnsBothFilesGreen();
     void differentPairStaysYellow();
-    void fileStillInAnotherPairStaysYellow();
+    void provenPairDropsItsOtherPairs();
+    void crossPairsCollapseToTwoGreens();
+    void oneProvenPairLeavesOtherPartnersRed();
+    void partnerStillPairedElsewhereStaysYellow();
+    void provenFileIsNotOfferedAgain();
+    void summaryAfterCollapseMatchesTheTrees();
+    void pairWithUnknownPathIsNeverOffered();
     void nonLayerPairIsNeverOfferedToTheCheck();
     void summaryCountsSameDataPairAsIdentical();
 };
@@ -702,10 +708,99 @@ void TestSameDataCheck::differentPairStaysYellow()
     QCOMPARE(classificationOf(result.entriesB, "top.gtl"), EntryClassification::Different);
 }
 
-void TestSameDataCheck::fileStillInAnotherPairStaysYellow()
+void TestSameDataCheck::provenPairDropsItsOtherPairs()
 {
-    // The name pass paired A's top.gtl with two B files. It matches the first
-    // but not the second, so A's file still has something to look at.
+    // A's top.gtl matches v1; its pair with v2 goes, and v2 is left with no
+    // counterpart at all -> red.
+    ArchiveComparisonResult result;
+    result.entriesA = {entry("top.gtl", EntryClassification::Different)};
+    result.entriesB = {entry("v1/top.gtl", EntryClassification::Different),
+                       entry("v2/top.gtl", EntryClassification::Different)};
+    result.differingPairs = {{"top.gtl", "v1/top.gtl", PairReason::SameName},
+                             {"top.gtl", "v2/top.gtl", PairReason::SameName}};
+    SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &p) { return p.relativePathB == "v1/top.gtl"; });
+
+    QVERIFY(result.differingPairs.isEmpty());
+    QCOMPARE(result.sameDataPairs.size(), 1);
+    QCOMPARE(classificationOf(result.entriesA, "top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "v1/top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "v2/top.gtl"), EntryClassification::OnlyInThisArchive);
+}
+
+void TestSameDataCheck::crossPairsCollapseToTwoGreens()
+{
+    // a/top + b/top on both sides: the name pass makes 4 pairs. a=a and b=b
+    // are proven; the two cross pairs go and nothing is left yellow or red.
+    ArchiveComparisonResult result;
+    result.entriesA = {entry("a/top.gtl", EntryClassification::Different),
+                       entry("b/top.gtl", EntryClassification::Different)};
+    result.entriesB = {entry("a/top.gtl", EntryClassification::Different),
+                       entry("b/top.gtl", EntryClassification::Different)};
+    result.differingPairs = {{"a/top.gtl", "a/top.gtl", PairReason::SameName},
+                             {"a/top.gtl", "b/top.gtl", PairReason::SameName},
+                             {"b/top.gtl", "a/top.gtl", PairReason::SameName},
+                             {"b/top.gtl", "b/top.gtl", PairReason::SameName}};
+    SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &p) {
+        return p.relativePathA.section('/', 0, 0) == p.relativePathB.section('/', 0, 0);
+    });
+
+    QVERIFY(result.differingPairs.isEmpty());
+    QCOMPARE(result.sameDataPairs.size(), 2);
+    QCOMPARE(classificationOf(result.entriesA, "a/top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesA, "b/top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "a/top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "b/top.gtl"), EntryClassification::Identical);
+}
+
+void TestSameDataCheck::oneProvenPairLeavesOtherPartnersRed()
+{
+    // top.gtl vs v1/, v2/, v3/; only v2 matches -> v2 green, v1 and v3 red.
+    ArchiveComparisonResult result;
+    result.entriesA = {entry("top.gtl", EntryClassification::Different)};
+    result.entriesB = {entry("v1/top.gtl", EntryClassification::Different),
+                       entry("v2/top.gtl", EntryClassification::Different),
+                       entry("v3/top.gtl", EntryClassification::Different)};
+    result.differingPairs = {{"top.gtl", "v1/top.gtl", PairReason::SameName},
+                             {"top.gtl", "v2/top.gtl", PairReason::SameName},
+                             {"top.gtl", "v3/top.gtl", PairReason::SameName}};
+    SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &p) { return p.relativePathB == "v2/top.gtl"; });
+
+    QVERIFY(result.differingPairs.isEmpty());
+    QCOMPARE(result.sameDataPairs.size(), 1);
+    QCOMPARE(classificationOf(result.entriesA, "top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "v1/top.gtl"), EntryClassification::OnlyInThisArchive);
+    QCOMPARE(classificationOf(result.entriesB, "v2/top.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "v3/top.gtl"), EntryClassification::OnlyInThisArchive);
+}
+
+void TestSameDataCheck::partnerStillPairedElsewhereStaysYellow()
+{
+    // A: x.gtl, y.gtl; B: x.gtl, other/y.gtl. Pair (A x, B x) is proven and
+    // (A y, B x) is dropped. A y still pairs with B other/y (unproven), so
+    // A y stays yellow, not red.
+    ArchiveComparisonResult result;
+    result.entriesA = {entry("x.gtl", EntryClassification::Different),
+                       entry("y.gtl", EntryClassification::Different)};
+    result.entriesB = {entry("x.gtl", EntryClassification::Different),
+                       entry("other/y.gtl", EntryClassification::Different)};
+    result.differingPairs = {{"x.gtl", "x.gtl", PairReason::SameName},
+                             {"y.gtl", "x.gtl", PairReason::SameName},
+                             {"y.gtl", "other/y.gtl", PairReason::SameName}};
+    SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &p) { return p.relativePathA == "x.gtl"; });
+
+    QCOMPARE(result.differingPairs.size(), 1);
+    QCOMPARE(result.differingPairs.first().relativePathA, QString("y.gtl"));
+    QCOMPARE(result.differingPairs.first().relativePathB, QString("other/y.gtl"));
+    QCOMPARE(result.sameDataPairs.size(), 1);
+    QCOMPARE(classificationOf(result.entriesA, "x.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesA, "y.gtl"), EntryClassification::Different);
+    QCOMPARE(classificationOf(result.entriesB, "x.gtl"), EntryClassification::Identical);
+    QCOMPARE(classificationOf(result.entriesB, "other/y.gtl"), EntryClassification::Different);
+}
+
+void TestSameDataCheck::provenFileIsNotOfferedAgain()
+{
+    // After top.gtl-v1 is proven, top.gtl-v2 is never tested.
     ArchiveComparisonResult result;
     result.entriesA = {entry("top.gtl", EntryClassification::Different)};
     result.entriesB = {entry("v1/top.gtl", EntryClassification::Different),
@@ -713,14 +808,59 @@ void TestSameDataCheck::fileStillInAnotherPairStaysYellow()
     result.differingPairs = {{"top.gtl", "v1/top.gtl", PairReason::SameName},
                              {"top.gtl", "v2/top.gtl", PairReason::SameName}};
 
-    SameDataCheck::collapseSameDataPairs(result,
-                                         [](const DifferingPair &pair) { return pair.relativePathB == "v1/top.gtl"; });
+    int calls = 0;
+    SameDataCheck::collapseSameDataPairs(result, [&calls](const DifferingPair &) {
+        ++calls;
+        return true;
+    });
 
+    QCOMPARE(calls, 1);
+    QCOMPARE(result.sameDataPairs.size(), 1);
+    QCOMPARE(result.sameDataPairs.first().relativePathB, QString("v1/top.gtl"));
+    QVERIFY(result.differingPairs.isEmpty());
+    QCOMPARE(classificationOf(result.entriesB, "v2/top.gtl"), EntryClassification::OnlyInThisArchive);
+}
+
+void TestSameDataCheck::summaryAfterCollapseMatchesTheTrees()
+{
+    // The provenPairDropsItsOtherPairs scenario with a distinct crc32 per
+    // entry: the summary must agree with what the trees show.
+    ArchiveComparisonResult result;
+    result.entriesA = {entry("top.gtl", EntryClassification::Different)};
+    result.entriesB = {entry("v1/top.gtl", EntryClassification::Different),
+                       entry("v2/top.gtl", EntryClassification::Different)};
+    result.entriesA[0].crc32 = 1;
+    result.entriesB[0].crc32 = 2;
+    result.entriesB[1].crc32 = 3;
+    result.differingPairs = {{"top.gtl", "v1/top.gtl", PairReason::SameName},
+                             {"top.gtl", "v2/top.gtl", PairReason::SameName}};
+    SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &p) { return p.relativePathB == "v1/top.gtl"; });
+    const ComparisonSummary::Summary summary = ComparisonSummary::summarize(result);
+
+    QCOMPARE(summary.gerber.identicalClasses, 1);
+    QCOMPARE(summary.gerber.pairs, 0);
+    QCOMPARE(summary.gerber.onlyInB, 1);
+    QVERIFY(!summary.fullyIdentical());
+}
+
+void TestSameDataCheck::pairWithUnknownPathIsNeverOffered()
+{
+    // A pair whose path is missing from entriesA: the kind defaults to
+    // OtherData, so the check is not run and the pair stays as it was.
+    ArchiveComparisonResult result;
+    result.entriesB = {entry("top.gtl", EntryClassification::Different)};
+    result.differingPairs = {{"ghost.gtl", "top.gtl", PairReason::SameName}};
+
+    int calls = 0;
+    SameDataCheck::collapseSameDataPairs(result, [&calls](const DifferingPair &) {
+        ++calls;
+        return true;
+    });
+
+    QCOMPARE(calls, 0);
     QCOMPARE(result.differingPairs.size(), 1);
-    QCOMPARE(result.differingPairs.first().relativePathB, QString("v2/top.gtl"));
-    QCOMPARE(classificationOf(result.entriesA, "top.gtl"), EntryClassification::Different);
-    QCOMPARE(classificationOf(result.entriesB, "v1/top.gtl"), EntryClassification::Identical);
-    QCOMPARE(classificationOf(result.entriesB, "v2/top.gtl"), EntryClassification::Different);
+    QVERIFY(result.sameDataPairs.isEmpty());
+    QCOMPARE(classificationOf(result.entriesB, "top.gtl"), EntryClassification::Different);
 }
 
 void TestSameDataCheck::nonLayerPairIsNeverOfferedToTheCheck()

@@ -60,41 +60,64 @@ void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const
         kindsB.insert(entry.relativePath, entry.kind);
     }
 
-    QVector<DifferingPair> remaining;
+    // Greedy, one-to-one: the pairs are walked in the name pass's order and
+    // the first pair the check accepts claims both of its files. A claimed
+    // file is "proven" - it has its counterpart - so every other pair that
+    // involves it is dropped without being offered to the check again. This
+    // matters when the name pass paired one file with several same-named
+    // files (a cross product): the proven pair is the answer, the rest were
+    // only candidates.
+    QSet<QString> provenA;
+    QSet<QString> provenB;
+    QSet<QString> pairedBeforeA;
+    QSet<QString> pairedBeforeB;
     for (const DifferingPair &pair : result.differingPairs) {
-        const bool parseable = kindsA.value(pair.relativePathA) == DataKind::GerberData
-            && kindsB.value(pair.relativePathB) == DataKind::GerberData;
+        pairedBeforeA.insert(pair.relativePathA);
+        pairedBeforeB.insert(pair.relativePathB);
+        if (provenA.contains(pair.relativePathA) || provenB.contains(pair.relativePathB)) {
+            continue;
+        }
+        // A path with no entry has no known kind: treat it as not parseable.
+        const bool parseable = kindsA.value(pair.relativePathA, DataKind::OtherData) == DataKind::GerberData
+            && kindsB.value(pair.relativePathB, DataKind::OtherData) == DataKind::GerberData;
         if (parseable && isSame(pair)) {
             result.sameDataPairs.append(pair);
-        } else {
-            remaining.append(pair);
+            provenA.insert(pair.relativePathA);
+            provenB.insert(pair.relativePathB);
         }
     }
-    result.differingPairs = remaining;
 
-    // A file may only turn green once no remaining pair still involves it.
+    // Pairs that touch no proven file stay yellow.
+    QVector<DifferingPair> remaining;
     QSet<QString> stillPairedA;
     QSet<QString> stillPairedB;
     for (const DifferingPair &pair : result.differingPairs) {
+        if (provenA.contains(pair.relativePathA) || provenB.contains(pair.relativePathB)) {
+            continue;
+        }
+        remaining.append(pair);
         stillPairedA.insert(pair.relativePathA);
         stillPairedB.insert(pair.relativePathB);
     }
-    QSet<QString> sameA;
-    QSet<QString> sameB;
-    for (const DifferingPair &pair : result.sameDataPairs) {
-        sameA.insert(pair.relativePathA);
-        sameB.insert(pair.relativePathB);
-    }
+    result.differingPairs = remaining;
 
-    const auto turnGreen = [](QVector<ArchiveEntry> &entries, const QSet<QString> &same,
-                              const QSet<QString> &stillPaired) {
+    // Proven files turn green. A file that was in a pair, is not proven and
+    // is in no remaining pair turns red: every file it could have been
+    // compared with already matched something else, so on the other side it
+    // has no counterpart left - which is exactly what red means.
+    const auto recolour = [](QVector<ArchiveEntry> &entries, const QSet<QString> &proven,
+                             const QSet<QString> &pairedBefore, const QSet<QString> &stillPaired) {
         for (ArchiveEntry &entry : entries) {
-            if (entry.classification == EntryClassification::Different && same.contains(entry.relativePath)
-                && !stillPaired.contains(entry.relativePath)) {
+            if (entry.classification != EntryClassification::Different) {
+                continue;
+            }
+            if (proven.contains(entry.relativePath)) {
                 entry.classification = EntryClassification::Identical;
+            } else if (pairedBefore.contains(entry.relativePath) && !stillPaired.contains(entry.relativePath)) {
+                entry.classification = EntryClassification::OnlyInThisArchive;
             }
         }
     };
-    turnGreen(result.entriesA, sameA, stillPairedA);
-    turnGreen(result.entriesB, sameB, stillPairedB);
+    recolour(result.entriesA, provenA, pairedBeforeA, stillPairedA);
+    recolour(result.entriesB, provenB, pairedBeforeB, stillPairedB);
 }

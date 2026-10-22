@@ -35,12 +35,14 @@ bool isSameData(const QByteArray &bytesA, const QByteArray &bytesB);
 
 using PairPredicate = std::function<bool(const DifferingPair &pair)>;
 
-// Removes every pair `isSame` accepts from result.differingPairs, records it
-// in result.sameDataPairs, and turns its two files green - unless a file is
-// still part of another pair that stayed (the name pass can pair one file
-// with several), in which case it stays yellow, because there is still
-// something to look at. Only pairs where both files are GerberData are
-// offered to `isSame`; nothing else can be parsed.
+// Moves every pair `isSame` accepts from result.differingPairs to
+// result.sameDataPairs and turns its two files green. One-to-one: once a file
+// is proven same-data (the first accepted pair in the name pass's order wins),
+// its other pairs are dropped without being tested. A file left with no pair
+// at all because of that turns red (OnlyInThisArchive) - its possible
+// partners already matched other files. A file that still has an unproven
+// pair stays yellow. Only pairs where both files are GerberData are offered
+// to `isSame`; nothing else can be parsed.
 void collapseSameDataPairs(ArchiveComparisonResult &result, const PairPredicate &isSame);
 
 } // namespace SameDataCheck
