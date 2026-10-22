@@ -111,6 +111,8 @@ private slots:
     void layerWithNoObjectsIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
+    void positiveFilePolarityEqualsMissing();
+    void drillLayerColorIsNoise();
 
     // Gerber: geometry only in forms the parser fully reads
     void secondRegionOutlineIsNeverSameData();
@@ -414,6 +416,19 @@ void TestSameDataCheck::redefinedMacroIsNeverSameData()
     const QString b = "%AMBOX*\n21,1,$1,$2,0,0,45*%\n%ADD10BOX,1X2*%\n%ADD11BOX,1X2*%\n";
     const QString draw = "D10*\nX0Y0D03*\nD11*\nX1000000Y0D03*\n";
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + a, draw), gerber(kExportB + b, draw)));
+}
+
+void TestSameDataCheck::positiveFilePolarityEqualsMissing()
+{
+    // Newer Altium writes it, older does not (real data, pair test3).
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%TF.FilePolarity,Positive*%\n"), gerber(kExportB)));
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%TF.FilePolarity,Negative*%\n"), gerber(kExportB)));
+}
+
+void TestSameDataCheck::drillLayerColorIsNoise()
+{
+    QVERIFY(SameDataCheck::isSameData(drill(kDrillExportA + ";Layer_Color=9474304\n"),
+                                      drill(kDrillExportB + ";Layer_Color=32768\n")));
 }
 
 void TestSameDataCheck::unusedMacroDifferenceIsSameData()

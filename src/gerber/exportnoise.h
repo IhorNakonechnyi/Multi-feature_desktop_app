@@ -6,7 +6,8 @@
 
 // "Export noise": the handful of lines a CAD/CAM tool rewrites on EVERY
 // export even when the board itself is untouched - who exported it, when,
-// from which job. Re-saving a project and exporting again changes only
+// from which job - plus a drill display colour, and one X2 value that merely
+// restates a default (FilePolarity,Positive). Re-saving a project and exporting again changes only
 // these lines, which changes every file's CRC and turns a whole archive
 // yellow. The same-data check (SameDataCheck) skips exactly these lines and
 // nothing else.
@@ -38,6 +39,10 @@ inline const QStringList &volatileCommentWords()
         // KiCad's banner, "; DRILL file {KiCad 9.0.5} date 2025-...": its
         // date changes on every export but its first word is DRILL, not date.
         QStringLiteral("drill file"),
+        // Altium's drill header ";Layer_Color=9474304": the colour the layer
+        // is shown in on screen. It never moves a hole, and it differs
+        // between saves of the same board.
+        QStringLiteral("layer_color"),
     };
     return words;
 }
@@ -94,6 +99,22 @@ inline bool isVolatileAttribute(const QString &statement)
         }
     }
     return false;
+}
+
+// True only for the exact attribute "TF.FilePolarity,Positive" (value matched
+// case-insensitively). Positive is the Gerber default, so a file that states it
+// and a file that leaves it out describe the same image: newer Altium writes
+// it, older Altium does not. Anything else - ",Negative", extra fields - is
+// not the default and stays compared. This is not "noise" in the sense of
+// isVolatileAttribute (FilePolarity is deliberately not on that list): only
+// this one value is skipped, and only because it equals "absent".
+inline bool isDefaultFilePolarity(const QString &statement)
+{
+    static const QLatin1String prefix("TF.FilePolarity,");
+    if (!statement.startsWith(prefix, Qt::CaseInsensitive)) {
+        return false;
+    }
+    return statement.mid(prefix.size()).trimmed().compare(QLatin1String("Positive"), Qt::CaseInsensitive) == 0;
 }
 
 // `commentBody` is a comment's text with its marker already removed - what

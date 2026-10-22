@@ -1093,6 +1093,12 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             if (text.startsWith(QLatin1String("AD")) || ExportNoise::isVolatileAttribute(text)) {
                 continue;
             }
+            // %TF.FilePolarity,Positive is the Gerber default, so stating it
+            // and leaving it out mean the same image. Only that exact value
+            // is skipped; ",Negative" falls through and is compared.
+            if (ExportNoise::isDefaultFilePolarity(text)) {
+                continue;
+            }
             // %TO (net/component/pin labels on the objects that follow) and
             // %TD (clears them) never change the image - re-annotating R12 to
             // R15 or renaming a net moves no copper.
