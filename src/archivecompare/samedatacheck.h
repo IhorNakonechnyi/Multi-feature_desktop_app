@@ -24,10 +24,11 @@ namespace SameDataCheck {
 //    shape, order ignored inside each polarity run).
 // 2. Every line the object model does not capture matches too, in order -
 //    format directives, attributes, the drill tool table, drill comments
-//    (Gerber G04 comments are skipped - they never affect the image),
-//    and directives the parser ignores - except export noise (exportnoise.h).
-//    If either file holds something the parser cannot vouch for (the
-//    non-geometry list comes back as "no answer"), the pair is never same.
+//    (Gerber G04 comments are skipped - they never affect the image) -
+//    except export noise (exportnoise.h). Directives and commands the
+//    parser ignores are not compared: they make the list come back as "no
+//    answer", and if either file holds something the parser cannot vouch
+//    for that way, the pair is never same.
 //
 // Anything unparseable, or a layer with no objects at all, is never "same":
 // an empty parse proves nothing about what the file contains.
@@ -37,7 +38,8 @@ using PairPredicate = std::function<bool(const DifferingPair &pair)>;
 
 // Moves every pair `isSame` accepts from result.differingPairs to
 // result.sameDataPairs and turns its two files green. One-to-one: once a file
-// is proven same-data (the first accepted pair in the name pass's order wins),
+// is proven same-data (the first accepted pair wins, walking the pairs sorted
+// by path A then path B - so the outcome never depends on the input order),
 // its other pairs are dropped without being tested. A file left with no pair
 // at all because of that turns red (OnlyInThisArchive) - its possible
 // partners already matched other files. A file that still has an unproven

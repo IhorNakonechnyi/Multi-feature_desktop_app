@@ -165,6 +165,7 @@ private slots:
     void oneProvenPairLeavesOtherPartnersRed();
     void partnerStillPairedElsewhereStaysYellow();
     void provenFileIsNotOfferedAgain();
+    void collapseOrderDoesNotDependOnInputOrder();
     void summaryAfterCollapseMatchesTheTrees();
     void pairWithUnknownPathIsNeverOffered();
     void nonLayerPairIsNeverOfferedToTheCheck();
@@ -960,6 +961,30 @@ void TestSameDataCheck::provenFileIsNotOfferedAgain()
     QCOMPARE(result.sameDataPairs.first().relativePathB, QString("v1/top.gtl"));
     QVERIFY(result.differingPairs.isEmpty());
     QCOMPARE(classificationOf(result.entriesB, "v2/top.gtl"), EntryClassification::OnlyInThisArchive);
+}
+
+void TestSameDataCheck::collapseOrderDoesNotDependOnInputOrder()
+{
+    // top.gtl matches both v1 and v2. Which one wins must not depend on the
+    // order the name pass happened to list the pairs in.
+    const auto collapse = [](const QVector<DifferingPair> &pairs) {
+        ArchiveComparisonResult result;
+        result.entriesA = {entry("top.gtl", EntryClassification::Different)};
+        result.entriesB = {entry("v1/top.gtl", EntryClassification::Different),
+                           entry("v2/top.gtl", EntryClassification::Different)};
+        result.differingPairs = pairs;
+        SameDataCheck::collapseSameDataPairs(result, [](const DifferingPair &) { return true; });
+        return result;
+    };
+    const DifferingPair first{"top.gtl", "v1/top.gtl", PairReason::SameName};
+    const DifferingPair second{"top.gtl", "v2/top.gtl", PairReason::SameName};
+    const ArchiveComparisonResult forward = collapse({first, second});
+    const ArchiveComparisonResult backward = collapse({second, first});
+
+    for (const QString path : {"v1/top.gtl", "v2/top.gtl"}) {
+        QCOMPARE(classificationOf(forward.entriesB, path), classificationOf(backward.entriesB, path));
+    }
+    QCOMPARE(classificationOf(forward.entriesA, "top.gtl"), classificationOf(backward.entriesA, "top.gtl"));
 }
 
 void TestSameDataCheck::summaryAfterCollapseMatchesTheTrees()

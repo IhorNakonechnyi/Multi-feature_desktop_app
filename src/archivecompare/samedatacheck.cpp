@@ -1,5 +1,7 @@
 #include "samedatacheck.h"
 
+#include <algorithm>
+
 #include <QHash>
 #include <QSet>
 #include <QString>
@@ -60,7 +62,19 @@ void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const
         kindsB.insert(entry.relativePath, entry.kind);
     }
 
-    // Greedy, one-to-one: the pairs are walked in the name pass's order and
+    // Walk the pairs in a fixed order: sorted by path A, then path B. The
+    // name pass builds its pairs from a QHash, whose order can change from
+    // run to run - and with duplicates the order decides which partner
+    // wins, so the same two archives could colour differently each time.
+    QVector<DifferingPair> sortedPairs = result.differingPairs;
+    std::sort(sortedPairs.begin(), sortedPairs.end(), [](const DifferingPair &left, const DifferingPair &right) {
+        if (left.relativePathA != right.relativePathA) {
+            return left.relativePathA < right.relativePathA;
+        }
+        return left.relativePathB < right.relativePathB;
+    });
+
+    // Greedy, one-to-one: the pairs are walked in that order and
     // the first pair the check accepts claims both of its files. A claimed
     // file is "proven" - it has its counterpart - so every other pair that
     // involves it is dropped without being offered to the check again. This
@@ -71,7 +85,7 @@ void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const
     QSet<QString> provenB;
     QSet<QString> pairedBeforeA;
     QSet<QString> pairedBeforeB;
-    for (const DifferingPair &pair : result.differingPairs) {
+    for (const DifferingPair &pair : sortedPairs) {
         pairedBeforeA.insert(pair.relativePathA);
         pairedBeforeB.insert(pair.relativePathB);
         if (provenA.contains(pair.relativePathA) || provenB.contains(pair.relativePathB)) {
@@ -87,11 +101,11 @@ void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const
         }
     }
 
-    // Pairs that touch no proven file stay yellow.
+    // Pairs that touch no proven file stay yellow (kept in the sorted order).
     QVector<DifferingPair> remaining;
     QSet<QString> stillPairedA;
     QSet<QString> stillPairedB;
-    for (const DifferingPair &pair : result.differingPairs) {
+    for (const DifferingPair &pair : sortedPairs) {
         if (provenA.contains(pair.relativePathA) || provenB.contains(pair.relativePathB)) {
             continue;
         }
