@@ -349,28 +349,35 @@ void emitObject(ParserState &state, const GraphicObject &base)
     }
 }
 
+// True for a statement that can belong to a macro body. A body holds only
+// primitives (they start with a numeric code, e.g. "21,1,...") and variable
+// assignments (they start with '$', e.g. "$3=$1x2") - Gerber spec 4.5.
+// Every other parameter statement (FS, MO, AD, LP, AM, and attributes such as
+// TA/TO/TD/TF) starts with a letter, so it ends the body. Testing for what a
+// body line looks like, rather than listing what ends it, means a directive
+// we have never heard of still ends the body.
+bool isMacroBodyStatement(const GerberStatement &statement)
+{
+    if (!statement.isParameterStatement || statement.text.isEmpty()) {
+        return false;
+    }
+    const QChar first = statement.text.at(0);
+    return first.isDigit() || first == QLatin1Char('$');
+}
+
 // Parses "%AMname*primitiveStatement*primitiveStatement*...*%" - tokenize
 // has already split this into one GerberStatement per '*'-terminated
 // piece, all flagged isParameterStatement, so this just needs to collect
-// them from the "AMname" header statement until the next non-macro
-// statement.
+// them from the "AMname" header statement until the first statement that
+// is not a primitive or assignment.
 void parseMacroDefinition(const QVector<GerberStatement> &statements, int &index, ParserState &state)
 {
     const QString header = statements.at(index).text; // "AMname"
     const QString name = header.mid(2);
     QStringList body;
     ++index;
-    while (index < statements.size() && statements.at(index).isParameterStatement) {
-        const QString &text = statements.at(index).text;
-        // A new parameter directive (FS/MO/AD/LP/another AM) ends this
-        // macro's body - only digit/'$'-led primitive-or-assignment
-        // statements belong to it.
-        if (text.startsWith(QLatin1String("FS")) || text.startsWith(QLatin1String("MO"))
-            || text.startsWith(QLatin1String("AD")) || text.startsWith(QLatin1String("LP"))
-            || text.startsWith(QLatin1String("AM"))) {
-            break;
-        }
-        body.append(text);
+    while (index < statements.size() && isMacroBodyStatement(statements.at(index))) {
+        body.append(statements.at(index).text);
         ++index;
     }
     --index; // the outer loop's ++index will re-advance past what we consumed

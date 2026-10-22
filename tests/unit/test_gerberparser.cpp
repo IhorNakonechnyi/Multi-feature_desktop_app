@@ -46,6 +46,7 @@ private slots:
     void operationCodeIsModalOnBareCoordinates();
     void multiQuadrantArcWithEqualEndpointsIsAFullCircle();
     void singleQuadrantArcResolvesUnsignedCenterOffsets();
+    void macroBodyStopsAtApertureAttribute();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -886,6 +887,18 @@ void TestGerberParser::singleQuadrantArcResolvesUnsignedCenterOffsets()
     QVERIFY(arc.isArc);
     QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
     QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::macroBodyStopsAtApertureAttribute()
+{
+    const QString content = "%FSLAX46Y46*%\n%MOMM*%\n"
+                            "%AMBOX*\n21,1,$1,$2,0,0,0*%\n"
+                            "%TA.AperFunction,SMDPad*%\n"
+                            "%ADD10BOX,1X2*%\n"
+                            "D10*\nX0Y0D03*\nM02*\n";
+    const Layer layer = GerberParser::parseContentToObjects(content);
+    QVERIFY(layer.macros.contains("BOX"));
+    QCOMPARE(layer.macros.value("BOX").statements, QStringList({"21,1,$1,$2,0,0,0"}));
 }
 
 QTEST_MAIN(TestGerberParser)
