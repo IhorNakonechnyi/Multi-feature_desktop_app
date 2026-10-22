@@ -150,6 +150,12 @@ private slots:
     void drillRepeatCommandIsNeverSameData();
     void drillRoutWithOffsetOnLinearMoveIsText();
     void drillMalformedCoordinateIsText();
+    void drillOverlongNumberIsText();
+    void altiumDrillHeaderIsSameData();
+    void drillIncrementalModeIsNeverSameData();
+    void drillUnitSwitchAfterHeaderIsNeverSameData();
+    void drillUnknownCommandIsNeverSameData();
+    void redefinedDrillToolIsNeverSameData();
 
     // Pair collapse and summary
     void sameDataPairTurnsBothFilesGreen();
@@ -744,6 +750,73 @@ void TestSameDataCheck::drillMalformedCoordinateIsText()
     // compared as text rather than be trusted as a hole.
     QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0.5Y2.0\n"),
                                        drill(kDrillExportB, "T01C0.300\n", "X1.0.7Y2.0\n")));
+}
+
+void TestSameDataCheck::drillOverlongNumberIsText()
+{
+    // 20 digits: more than a double holds, so the two values decode to the
+    // same hole although the text differs. Such a number must stay text.
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0000000000000000001Y2.250\n"),
+                                       drill(kDrillExportB, "T01C0.300\n", "X1.0000000000000000002Y2.250\n")));
+}
+
+void TestSameDataCheck::altiumDrillHeaderIsSameData()
+{
+    // The exact header shape Altium writes; only the colour and date differ.
+    const QString drillFile = "M48\n"
+                              ";Layer_Color=%1\n"
+                              ";date: %2\n"
+                              ";FILE_FORMAT=4:3\n"
+                              "METRIC,LZ\n"
+                              ";TYPE=PLATED\n"
+                              "T01F00S00C0.300\n"
+                              ";TYPE=NON_PLATED\n"
+                              "T02F00S00C3.000\n"
+                              "%\n"
+                              "T01\n"
+                              "X15000Y22500\n"
+                              "X30000Y22500\n"
+                              "T02\n"
+                              "X50000Y50000\n"
+                              "M30\n";
+    QVERIFY(SameDataCheck::isSameData(drillFile.arg("9474304", "2026-10-01").toUtf8(),
+                                      drillFile.arg("32768", "2026-10-20").toUtf8()));
+}
+
+void TestSameDataCheck::drillIncrementalModeIsNeverSameData()
+{
+    // G91: coordinates are offsets from the last hole; the parser reads them
+    // as absolute, so the holes it records are not the file's holes.
+    const QString holes = "G91\nX1.500Y2.250\nX3.000Y2.250\n";
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", holes),
+                                       drill(kDrillExportB, "T01C0.300\n", holes)));
+}
+
+void TestSameDataCheck::drillUnitSwitchAfterHeaderIsNeverSameData()
+{
+    // The parser reads the unit only in the header; a switch later is ignored.
+    for (const QString &unitSwitch : {"M72\n", "INCH\n"}) {
+        const QString holes = "X1.500Y2.250\n" + unitSwitch + "X3.000Y2.250\n";
+        QVERIFY2(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", holes),
+                                            drill(kDrillExportB, "T01C0.300\n", holes)),
+                 qPrintable(unitSwitch));
+    }
+}
+
+void TestSameDataCheck::drillUnknownCommandIsNeverSameData()
+{
+    const QString holes = "X1.500Y2.250\nM97\nX3.000Y2.250\n";
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", holes),
+                                       drill(kDrillExportB, "T01C0.300\n", holes)));
+}
+
+void TestSameDataCheck::redefinedDrillToolIsNeverSameData()
+{
+    // The parser keeps only the last diameter of T01, so A's first hole is
+    // drawn 0.5 although the file drilled it with 0.3.
+    QVERIFY(!SameDataCheck::isSameData(
+        drill(kDrillExportA, "T01C0.300\n", "X1.500Y2.250\nT01C0.500\nX3.000Y2.250\n"),
+        drill(kDrillExportB, "T01C0.300\n", "X1.500Y2.250\nX3.000Y2.250\nT01C0.500\n")));
 }
 
 void TestSameDataCheck::sameDataPairTurnsBothFilesGreen()

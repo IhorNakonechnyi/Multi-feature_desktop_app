@@ -44,14 +44,17 @@ Layer parseContentToObjects(const QString &content);
 // GerberParser::nonGeometryStatements, with the same purpose. Left out:
 // lines that are wholly a hole or rout move in a form the parser reads
 // (X/Y only, G00-G03 with X/Y, I/J only on G02/G03) and bare tool selects
-// ("T03"), whose effect is already in each object's aperture. Kept: the
-// header - unit/format lines, the tool table, comments such as FILE_FORMAT
-// or a plated/non-plated note - and any command the parser ignores, including
-// coordinate lines in a form it does not read (a G85 slot). Stops
-// after M30/M00, exactly where the parser stops.
+// ("T03"), whose effect is already in each object's aperture. Kept: only an
+// allow-list - the header (M48, '%'/M95, unit lines, FMAT, the tool table,
+// comments such as FILE_FORMAT or a plated/non-plated note), M15/M16/G05/G90,
+// G00-G03 lines in a form not left out, and G85 slot lines (the parser reads
+// only their start point). Stops after M30/M00, exactly where the parser
+// stops.
 //
 // std::nullopt means "this file contains something the parser cannot vouch
-// for" (today: an R repeat command); such a file is never the same data.
+// for": any line not on the allow-list (G91, M72, pattern or mirror
+// commands, ...), a unit line after the header, an R repeat command, or a
+// tool defined twice. Such a file is never the same data.
 std::optional<QStringList> nonGeometryLines(const QString &content);
 
 } // namespace ExcellonParser
