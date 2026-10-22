@@ -383,12 +383,18 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         // offset on a straight G01, any form we did not foresee) falls
         // through and is compared as text, so a difference the object model
         // cannot see still shows up. I/J are only read on arcs (G02/G03).
+        // A number must be well formed: optional sign, then digits with an
+        // optional point, or a point followed by digits. A loose pattern would
+        // accept "1.0.5", which toDouble reads as 0, so two different
+        // malformed values would look identical in the object model. A
+        // malformed number fails the match and the line stays compared as text.
+        static const QString num = QStringLiteral("[+-]?(?:\\d+\\.?\\d*|\\.\\d+)");
         static const QRegularExpression holeOrModalMove(
-            QStringLiteral("^(X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?$"));
+            QStringLiteral("^(X%1)?(Y%1)?$").arg(num));
         static const QRegularExpression linearOrRoutMove(
-            QStringLiteral("^G0[0-3](X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?$"));
+            QStringLiteral("^G0[0-3](X%1)?(Y%1)?$").arg(num));
         static const QRegularExpression arcMove(
-            QStringLiteral("^G0[23](X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?(I[+-]?[\\d.]+)?(J[+-]?[\\d.]+)?$"));
+            QStringLiteral("^G0[23](X%1)?(Y%1)?(I%1)?(J%1)?$").arg(num));
         // The first form also matches an empty string, but empty lines were
         // skipped above, so a match here always has at least one of X/Y.
         if (holeOrModalMove.match(line).hasMatch() || linearOrRoutMove.match(line).hasMatch()

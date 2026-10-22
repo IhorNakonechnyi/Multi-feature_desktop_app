@@ -112,6 +112,7 @@ private slots:
     void drillUnchangedSlotIsSameData();
     void drillRepeatCommandIsNeverSameData();
     void drillRoutWithOffsetOnLinearMoveIsText();
+    void drillMalformedCoordinateIsText();
 
     // Pair collapse and summary
     void sameDataPairTurnsBothFilesGreen();
@@ -410,6 +411,14 @@ void TestSameDataCheck::drillRoutWithOffsetOnLinearMoveIsText()
     const QString routB = "G00X1.0Y1.0\nM15\nG01X2.0Y1.0I0.7J0.0\nM16\nG05\n";
     QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", routA),
                                        drill(kDrillExportB, "T01C0.300\n", routB)));
+}
+
+void TestSameDataCheck::drillMalformedCoordinateIsText()
+{
+    // "1.0.5" is not a number; the parser reads it as 0, so it must stay
+    // compared as text rather than be trusted as a hole.
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0.5Y2.0\n"),
+                                       drill(kDrillExportB, "T01C0.300\n", "X1.0.7Y2.0\n")));
 }
 
 void TestSameDataCheck::sameDataPairTurnsBothFilesGreen()
