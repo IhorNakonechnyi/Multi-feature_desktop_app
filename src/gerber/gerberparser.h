@@ -37,15 +37,19 @@ QPainterPath parseContent(const QString &content);
 // file attributes (see exportnoise.h). Geometry statements (coordinates, D-codes, aperture
 // selects) and %AD aperture definitions are left out - they are compared
 // through the parsed objects instead. Comments are left out because they
-// never affect the image. Everything else stays: format/unit directives, X2
-// attributes such as .FileFunction, macro bodies, and any
-// directive this parser ignores when drawing (%LR, %IP, ...). That last
-// group is the point: two files can only be called "same data" if what the
-// parser does not understand is identical too, so an ignored directive can
-// never hide a real change. Used by SameDataCheck.
+// never affect the image. %LN and %IN (layer/image names) and %IPPOS (the
+// default polarity) are left out too: they differ per export and draw nothing.
 //
-// std::nullopt means "this file contains something the parser cannot vouch
-// for"; such a file is never the same data.
+// Kept (must be equal): %FS %MO %SR %LP %TF %TA, %AM with its macro body,
+// and plain statements such as G01/G36/G75/G90/M02 (a one-digit G-code is
+// written with its leading zero, so G1 and G01 compare equal).
+//
+// Unknown means no answer: any other % directive (%LR, %LM, %SF, %IPNEG, a
+// stray primitive outside %AM, ...) and G91 (incremental coordinates) make
+// the result std::nullopt. The parser ignores or does not read these, and
+// where they sit relative to the objects is not compared, so equal text in
+// both files proves nothing. A file with std::nullopt is never the same
+// data. Used by SameDataCheck.
 std::optional<QStringList> nonGeometryStatements(const QString &content);
 
 // Reads filePath and parses it. Returns an empty path if the file can't

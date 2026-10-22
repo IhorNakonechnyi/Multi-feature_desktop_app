@@ -365,6 +365,19 @@ bool isMacroBodyStatement(const GerberStatement &statement)
     return first.isDigit() || first == QLatin1Char('$');
 }
 
+// Writes a one-digit G-code with its leading zero: "G1X5D01" becomes
+// "G01X5D01". Anything else comes back unchanged. The parse loop and
+// nonGeometryStatements both call this, so the two always agree on what
+// "G1" and "G01" mean (the same statement).
+QString normalizedGCode(QString text)
+{
+    if (text.length() >= 2 && text.at(0) == QLatin1Char('G') && text.at(1).isDigit()
+        && (text.length() == 2 || !text.at(2).isDigit())) {
+        text.insert(1, QLatin1Char('0'));
+    }
+    return text;
+}
+
 // Parses "%AMname*primitiveStatement*primitiveStatement*...*%" - tokenize
 // has already split this into one GerberStatement per '*'-terminated
 // piece, all flagged isParameterStatement, so this just needs to collect
@@ -627,10 +640,7 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
         // board-frame layers as disconnected dots from stale pen
         // positions. Normalize the one-digit spelling to two digits once,
         // here, so every startsWith("G0x") below just works.
-        if (text.length() >= 2 && text.at(0) == QLatin1Char('G') && text.at(1).isDigit()
-            && (text.length() == 2 || !text.at(2).isDigit())) {
-            text.insert(1, QLatin1Char('0'));
-        }
+        text = normalizedGCode(text);
         if (text.startsWith(QLatin1String("G74")) || text.startsWith(QLatin1String("G75"))) {
             // Arc quadrant mode. Both are usually standalone statements;
             // strip the code and keep processing anything that follows on
@@ -844,23 +854,68 @@ QPainterPath GerberParser::parseContent(const QString &content)
 std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content)
 {
     QStringList kept;
+    bool inMacro = false; // true while the statements after a %AM header are its body
     for (const GerberStatement &statement : tokenize(content)) {
         const QString &text = statement.text;
         if (statement.isParameterStatement) {
+            // A macro body runs from the %AM header to the first statement
+            // that does not look like a body line (same test the parser uses).
+            if (inMacro && !isMacroBodyStatement(statement)) {
+                inMacro = false;
+            }
+
+            // Group 1 - SKIP: directives that cannot change the image, or
+            // that are compared some other way.
             // %AD is compared through the objects (by aperture shape, not by
-            // its D-number), so it is the one directive left out. X2
-            // attributes are kept unless they are export noise.
+            // its D-number). X2 attributes are skipped only if they are
+            // export noise.
             if (text.startsWith(QLatin1String("AD")) || ExportNoise::isVolatileAttribute(text)) {
                 continue;
             }
             // %TO (net/component/pin labels on the objects that follow) and
             // %TD (clears them) never change the image - re-annotating R12 to
-            // R15 or renaming a net moves no copper - so they are skipped too.
+            // R15 or renaming a net moves no copper.
             if (text.startsWith(QLatin1String("TO")) || text.startsWith(QLatin1String("TD"))) {
                 continue;
             }
-            kept << QLatin1Char('%') + text;
-            continue;
+            // %LN (layer name) and %IN (image name) are labels that differ
+            // per export; they draw nothing. Exactly these two letters - not
+            // %LM, %LR, %LS (which do change geometry) or %IR, %IP.
+            if (text.startsWith(QLatin1String("LN")) || text.startsWith(QLatin1String("IN"))) {
+                continue;
+            }
+            // %IPPOS (image polarity positive) is the default, so it says
+            // nothing. Exact match: %IPNEG changes the image and falls
+            // through to the refuse group.
+            if (text == QLatin1String("IPPOS")) {
+                continue;
+            }
+
+            // Group 2 - KEEP: directives the parser understands (or labels
+            // that describe the file); they must be equal in both files.
+            // A macro body line is kept too while we are inside %AM.
+            if (text.startsWith(QLatin1String("AM"))) {
+                inMacro = true;
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            if (inMacro) {
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            if (text.startsWith(QLatin1String("FS")) || text.startsWith(QLatin1String("MO"))
+                || text.startsWith(QLatin1String("SR")) || text.startsWith(QLatin1String("LP"))
+                || text.startsWith(QLatin1String("TF")) || text.startsWith(QLatin1String("TA"))) {
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+
+            // Group 3 - REFUSE: everything else (%LR, %LM, %SF, %OF, %IPNEG,
+            // a primitive outside any %AM, directives we have never heard of).
+            // The parser ignores or does not know them, and where they sit
+            // relative to the objects is not compared, so equal text in both
+            // files proves nothing. No answer is safer than a wrong "same".
+            return std::nullopt;
         }
         // Same comment test as the parse loop above: only a literal "G04".
         // A G04 comment never affects the image (Gerber spec), so ALL of them
@@ -871,13 +926,21 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         if (text.startsWith(QLatin1String("G04"))) {
             continue;
         }
+        // Spell "G1" as "G01", exactly as the parse loop does, so the two
+        // spellings of one statement compare equal.
+        const QString plain = normalizedGCode(text);
+        // G91 switches to incremental coordinates. The parser reads every
+        // coordinate as absolute, so such a file is not understood.
+        if (plain.startsWith(QLatin1String("G91"))) {
+            return std::nullopt;
+        }
         // Anything carrying coordinates or a D-code is geometry (a draw,
         // move, flash or aperture select) and lives in the object model.
         const bool isGeometry = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
             || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'))
             || text.contains(QLatin1Char('D'));
         if (!isGeometry) {
-            kept << text; // G01/G36/G75/G90/M02 ... - kept as-is, in order
+            kept << plain; // G01/G36/G75/G90/M02 ... - kept in order
         }
     }
     return kept;

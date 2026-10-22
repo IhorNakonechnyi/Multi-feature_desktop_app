@@ -84,6 +84,7 @@ private slots:
     void reexportWithNewJobUserDateIsSameData();
     void reexportWithNewX2DateAndSoftwareIsSameData();
     void reexportWithNewSameCoordinatesGuidIsSameData();
+    void oldFileHeaderDirectivesAreSameData();
     void windowsLineEndingsAreSameData();
     void renumberedApertureWithSameShapeIsSameData();
     void reorderedDarkObjectsAreSameData();
@@ -97,6 +98,9 @@ private slots:
     void missingDuplicateObjectIsDifferent();
     void changedFileFunctionAttributeIsDifferent();
     void changedDirectiveTheParserIgnoresIsDifferent();
+    void ignoredTransformDirectiveIsNeverSameData();
+    void incrementalCoordinatesAreNeverSameData();
+    void strayMacroPrimitiveIsNeverSameData();
     void layerWithNoObjectsIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
@@ -320,6 +324,40 @@ void TestSameDataCheck::changedDirectiveTheParserIgnoresIsDifferent()
     // The parser does not apply %LR (rotation), so both files parse to the
     // same objects - only the non-geometry comparison can catch this.
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%LR0*%\n"), gerber(kExportB + "%LR90*%\n")));
+}
+
+void TestSameDataCheck::ignoredTransformDirectiveIsNeverSameData()
+{
+    // %LR is ignored by the parser, so even in both files it proves nothing:
+    // where it sits relative to the objects is not compared.
+    const QString body = "D10*\nX1000000Y1000000D03*\n%LR90*%\nX2000000Y1000000D03*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, body), gerber(kExportB, body)));
+    for (const QString &directive : {"%LMX*%\n", "%SFA2B2*%\n", "%OFA1B0*%\n", "%MIA1B0*%\n",
+                                     "%ASAYBX*%\n", "%IPNEG*%\n", "%IR90*%\n", "%ABD12*%\n"}) {
+        QVERIFY2(!SameDataCheck::isSameData(gerber(kExportA + directive), gerber(kExportB + directive)),
+                 qPrintable(directive));
+    }
+}
+
+void TestSameDataCheck::incrementalCoordinatesAreNeverSameData()
+{
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "G91*\n"), gerber(kExportB + "G91*\n")));
+}
+
+void TestSameDataCheck::oldFileHeaderDirectivesAreSameData()
+{
+    // Older exports: image polarity positive (the default), and layer/image
+    // names that differ per export.
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%IPPOS*%\n%LNfirst.gbr*%\n%INjob1*%\n"),
+                                      gerber(kExportB + "%LNsecond.gbr*%\n%INjob2*%\n")));
+}
+
+void TestSameDataCheck::strayMacroPrimitiveIsNeverSameData()
+{
+    // A digit-led parameter statement outside any %AM is not something the
+    // parser reads.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%1,1,0.5,0,0*%\n"),
+                                       gerber(kExportB + "%1,1,0.5,0,0*%\n")));
 }
 
 void TestSameDataCheck::layerWithNoObjectsIsNeverSameData()
