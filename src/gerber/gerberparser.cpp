@@ -857,12 +857,13 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
     bool inMacro = false; // true while the statements after a %AM header are its body
     for (const GerberStatement &statement : tokenize(content)) {
         const QString &text = statement.text;
+        // A macro body runs from the %AM header to the first statement of
+        // any kind that does not look like a body line (same test the parser
+        // uses) - a plain statement such as G01 ends it too.
+        if (inMacro && !isMacroBodyStatement(statement)) {
+            inMacro = false;
+        }
         if (statement.isParameterStatement) {
-            // A macro body runs from the %AM header to the first statement
-            // that does not look like a body line (same test the parser uses).
-            if (inMacro && !isMacroBodyStatement(statement)) {
-                inMacro = false;
-            }
 
             // Group 1 - SKIP: directives that cannot change the image, or
             // that are compared some other way.
@@ -903,9 +904,28 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 kept << QLatin1Char('%') + text;
                 continue;
             }
-            if (text.startsWith(QLatin1String("FS")) || text.startsWith(QLatin1String("MO"))
-                || text.startsWith(QLatin1String("SR")) || text.startsWith(QLatin1String("LP"))
-                || text.startsWith(QLatin1String("TF")) || text.startsWith(QLatin1String("TA"))) {
+            if (text.startsWith(QLatin1String("FS"))) {
+                // "FSLA..." / "FSTA...": the character after the
+                // zero-suppression letter is the notation, A = absolute.
+                // The parser reads only zero suppression and digit counts,
+                // so incremental (I) would be decoded as absolute - the
+                // same hazard as G91, so refuse anything but A.
+                if (text.length() < 4 || text.at(3) != QLatin1Char('A')) {
+                    return std::nullopt;
+                }
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            // Only the unit and polarity codes the parser knows; an unknown
+            // code under these prefixes is not understood, so it falls
+            // through to the refuse group.
+            if (text == QLatin1String("MOIN") || text == QLatin1String("MOMM")
+                || text == QLatin1String("LPD") || text == QLatin1String("LPC")) {
+                kept << QLatin1Char('%') + text;
+                continue;
+            }
+            if (text.startsWith(QLatin1String("SR")) || text.startsWith(QLatin1String("TF"))
+                || text.startsWith(QLatin1String("TA"))) {
                 kept << QLatin1Char('%') + text;
                 continue;
             }
@@ -930,8 +950,10 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         // spellings of one statement compare equal.
         const QString plain = normalizedGCode(text);
         // G91 switches to incremental coordinates. The parser reads every
-        // coordinate as absolute, so such a file is not understood.
-        if (plain.startsWith(QLatin1String("G91"))) {
+        // coordinate as absolute, so such a file is not understood. contains,
+        // not startsWith: it can be chained ("G90G91*"). G04 comments are
+        // already skipped above, so this can only over-refuse.
+        if (plain.contains(QLatin1String("G91"))) {
             return std::nullopt;
         }
         // Anything carrying coordinates or a D-code is geometry (a draw,

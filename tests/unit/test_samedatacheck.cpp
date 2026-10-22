@@ -100,6 +100,9 @@ private slots:
     void changedDirectiveTheParserIgnoresIsDifferent();
     void ignoredTransformDirectiveIsNeverSameData();
     void incrementalCoordinatesAreNeverSameData();
+    void incrementalFormatIsNeverSameData();
+    void strayPrimitiveAfterPlainStatementIsNeverSameData();
+    void unknownUnitOrPolarityCodeIsNeverSameData();
     void strayMacroPrimitiveIsNeverSameData();
     void layerWithNoObjectsIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
@@ -342,6 +345,33 @@ void TestSameDataCheck::ignoredTransformDirectiveIsNeverSameData()
 void TestSameDataCheck::incrementalCoordinatesAreNeverSameData()
 {
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "G91*\n"), gerber(kExportB + "G91*\n")));
+    // Chained after another code in one statement.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "G90G91*\n"), gerber(kExportB + "G90G91*\n")));
+}
+
+void TestSameDataCheck::incrementalFormatIsNeverSameData()
+{
+    // %FS...I... declares incremental notation; the parser reads absolute.
+    QByteArray a = gerber(kExportA);
+    QByteArray b = gerber(kExportB);
+    a.replace("%FSLAX46Y46*%", "%FSLIX46Y46*%");
+    b.replace("%FSLAX46Y46*%", "%FSLIX46Y46*%");
+    QVERIFY(!SameDataCheck::isSameData(a, b));
+}
+
+void TestSameDataCheck::strayPrimitiveAfterPlainStatementIsNeverSameData()
+{
+    // A plain statement ends the macro body, so the later primitive is stray.
+    const QString extra = "%AMFOO*1,1,0.5,0,0*%\nG01*\n%1,1,0.5,0,0*%\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + extra), gerber(kExportB + extra)));
+}
+
+void TestSameDataCheck::unknownUnitOrPolarityCodeIsNeverSameData()
+{
+    for (const QString &directive : {"%MOXX*%\n", "%LPX*%\n"}) {
+        QVERIFY2(!SameDataCheck::isSameData(gerber(kExportA + directive), gerber(kExportB + directive)),
+                 qPrintable(directive));
+    }
 }
 
 void TestSameDataCheck::oldFileHeaderDirectivesAreSameData()
