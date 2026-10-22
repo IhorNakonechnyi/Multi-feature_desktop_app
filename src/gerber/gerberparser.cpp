@@ -834,7 +834,7 @@ QPainterPath GerberParser::parseContent(const QString &content)
     return flattenAndCompositeForLegacyRender(layer);
 }
 
-QStringList GerberParser::nonGeometryStatements(const QString &content)
+std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content)
 {
     QStringList kept;
     for (const GerberStatement &statement : tokenize(content)) {

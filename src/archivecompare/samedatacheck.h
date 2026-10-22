@@ -26,6 +26,8 @@ namespace SameDataCheck {
 //    format directives, attributes, the drill tool table, drill comments
 //    (Gerber G04 comments are skipped - they never affect the image),
 //    and directives the parser ignores - except export noise (exportnoise.h).
+//    If either file holds something the parser cannot vouch for (the
+//    non-geometry list comes back as "no answer"), the pair is never same.
 //
 // Anything unparseable, or a layer with no objects at all, is never "same":
 // an empty parse proves nothing about what the file contains.

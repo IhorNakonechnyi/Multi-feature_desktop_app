@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include "exportnoise.h"
@@ -343,7 +344,7 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     return layer;
 }
 
-QStringList ExcellonParser::nonGeometryLines(const QString &content)
+std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content)
 {
     QStringList kept;
     for (const QString &rawLine : content.split(QLatin1Char('\n'))) {
@@ -369,7 +370,29 @@ QStringList ExcellonParser::nonGeometryLines(const QString &content)
             }
             continue;
         }
-        if (line.contains(QLatin1Char('X')) || line.contains(QLatin1Char('Y'))) {
+        // "R05X0.5" repeats the previous hole 5 times, shifted by X0.5. The
+        // parser does not read repeats at all, so nothing in the object model
+        // reflects them and no comparison of the text can vouch for them:
+        // a file using R is never "same data".
+        static const QRegularExpression repeatLine(QStringLiteral("^R\\d"));
+        if (repeatLine.match(line).hasMatch()) {
+            return std::nullopt;
+        }
+        // A line is left out as geometry only when the WHOLE line is in a
+        // form the parser really reads. Anything else (a G85 slot, an I/J
+        // offset on a straight G01, any form we did not foresee) falls
+        // through and is compared as text, so a difference the object model
+        // cannot see still shows up. I/J are only read on arcs (G02/G03).
+        static const QRegularExpression holeOrModalMove(
+            QStringLiteral("^(X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?$"));
+        static const QRegularExpression linearOrRoutMove(
+            QStringLiteral("^G0[0-3](X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?$"));
+        static const QRegularExpression arcMove(
+            QStringLiteral("^G0[23](X[+-]?[\\d.]+)?(Y[+-]?[\\d.]+)?(I[+-]?[\\d.]+)?(J[+-]?[\\d.]+)?$"));
+        // The first form also matches an empty string, but empty lines were
+        // skipped above, so a match here always has at least one of X/Y.
+        if (holeOrModalMove.match(line).hasMatch() || linearOrRoutMove.match(line).hasMatch()
+            || arcMove.match(line).hasMatch()) {
             continue; // a hole or a rout move - lives in the object model
         }
         kept << line;

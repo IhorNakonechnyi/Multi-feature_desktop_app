@@ -108,6 +108,10 @@ private slots:
     void drillChangedToolDiameterIsDifferent();
     void drillMovedHoleIsDifferent();
     void drillWithUndecodableCoordinatesIsNeverSameData();
+    void drillChangedSlotEndIsDifferent();
+    void drillUnchangedSlotIsSameData();
+    void drillRepeatCommandIsNeverSameData();
+    void drillRoutWithOffsetOnLinearMoveIsText();
 
     // Pair collapse and summary
     void sameDataPairTurnsBothFilesGreen();
@@ -376,6 +380,36 @@ void TestSameDataCheck::drillWithUndecodableCoordinatesIsNeverSameData()
     const QByteArray a = "M48\n;job: one\nT01C0.300\n%\nT01\nX15000Y22500\nM30\n";
     const QByteArray b = "M48\n;job: two\nT01C0.300\n%\nT01\nX15000Y22500\nM30\n";
     QVERIFY(!SameDataCheck::isSameData(a, b));
+}
+
+void TestSameDataCheck::drillChangedSlotEndIsDifferent()
+{
+    // G85 slots are not understood by the drill parser: both parse to one
+    // hole at the start point. The line must stay compared as text.
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0Y1.0G85X3.0Y1.0\n"),
+                                       drill(kDrillExportB, "T01C0.300\n", "X1.0Y1.0G85X5.0Y1.0\n")));
+}
+
+void TestSameDataCheck::drillUnchangedSlotIsSameData()
+{
+    QVERIFY(SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0Y1.0G85X3.0Y1.0\n"),
+                                      drill(kDrillExportB, "T01C0.300\n", "X1.0Y1.0G85X3.0Y1.0\n")));
+}
+
+void TestSameDataCheck::drillRepeatCommandIsNeverSameData()
+{
+    // R repeats are not parsed at all, so even identical lines prove nothing.
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0Y1.0\nR05X0.5\n"),
+                                       drill(kDrillExportB, "T01C0.300\n", "X1.0Y1.0\nR05X0.5\n")));
+}
+
+void TestSameDataCheck::drillRoutWithOffsetOnLinearMoveIsText()
+{
+    // G01 ignores I/J in the parser, so a G01 line with I/J stays text.
+    const QString routA = "G00X1.0Y1.0\nM15\nG01X2.0Y1.0I0.5J0.0\nM16\nG05\n";
+    const QString routB = "G00X1.0Y1.0\nM15\nG01X2.0Y1.0I0.7J0.0\nM16\nG05\n";
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", routA),
+                                       drill(kDrillExportB, "T01C0.300\n", routB)));
 }
 
 void TestSameDataCheck::sameDataPairTurnsBothFilesGreen()

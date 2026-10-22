@@ -24,7 +24,10 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
         // usually differ already, and the full parse is skipped.
-        if (GerberParser::nonGeometryStatements(textA) != GerberParser::nonGeometryStatements(textB)) {
+        // nullopt = the parser cannot vouch for that file: never same data.
+        const auto restA = GerberParser::nonGeometryStatements(textA);
+        const auto restB = GerberParser::nonGeometryStatements(textB);
+        if (!restA || !restB || *restA != *restB) {
             return false;
         }
         const Layer layerA = GerberParser::parseContentToObjects(textA);
@@ -32,7 +35,9 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
     }
 
-    if (ExcellonParser::nonGeometryLines(textA) != ExcellonParser::nonGeometryLines(textB)) {
+    const auto restA = ExcellonParser::nonGeometryLines(textA);
+    const auto restB = ExcellonParser::nonGeometryLines(textB);
+    if (!restA || !restB || *restA != *restB) {
         return false;
     }
     try {

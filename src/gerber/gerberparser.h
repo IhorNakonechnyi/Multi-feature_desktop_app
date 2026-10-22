@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <QPainterPath>
 #include <QString>
 #include <QStringList>
@@ -41,7 +43,10 @@ QPainterPath parseContent(const QString &content);
 // group is the point: two files can only be called "same data" if what the
 // parser does not understand is identical too, so an ignored directive can
 // never hide a real change. Used by SameDataCheck.
-QStringList nonGeometryStatements(const QString &content);
+//
+// std::nullopt means "this file contains something the parser cannot vouch
+// for"; such a file is never the same data.
+std::optional<QStringList> nonGeometryStatements(const QString &content);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an
