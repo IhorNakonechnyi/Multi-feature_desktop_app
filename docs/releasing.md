@@ -12,9 +12,10 @@ Total time: roughly 10-15 minutes, almost all of it the build.
 
 - **Close the app if it is running.** The link step fails with `LNK1168`
   otherwise, because the running process holds a lock on the executable.
-- Decide the version number and make sure it matches in **two** places:
+- Decide the version number and make sure it matches in **three** places:
   `project(... VERSION x.y.z)` in `CMakeLists.txt`, and `FILEVERSION` /
-  `PRODUCTVERSION` / the two version strings in `resources/app.rc`. They are
+  `PRODUCTVERSION` / the two version strings in `resources/app.rc`, and
+  `setApplicationVersion` in `src/main.cpp`. They are
   duplicated by hand; nothing checks that they agree.
 
 ## 1. Configure into a clean directory
