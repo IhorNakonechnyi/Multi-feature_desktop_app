@@ -108,6 +108,21 @@ private slots:
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
 
+    // Gerber: geometry only in forms the parser fully reads
+    void secondRegionOutlineIsNeverSameData();
+    void altiumTrailingRegionMoveIsSameData();
+    void unchangedRegionArcIsSameData();
+    void changedRegionArcBulgeIsDifferent();
+    void bareCoordinateBeforeAnyOperationIsText();
+    void coordinateWithApertureCodeIsText();
+    void oldStyleCodesAreSameData();
+    void regionNotStartedByMoveIsNeverSameData();
+    void repeatedRegionStartMoveIsNeverSameData();
+    void unclosedRegionIsNeverSameData();
+    void regionTooSmallToBeDrawnIsNeverSameData();
+    void arcWithXButNoYIsText();
+    void modeSetWithOnlyArcOffsetsIsText();
+
     // Excellon
     void drillReexportWithNewJobUserDateIsSameData();
     void drillReexportWithNewKiCadBannerIsSameData();
@@ -404,6 +419,115 @@ void TestSameDataCheck::unparseableBytesAreNeverSameData()
 {
     QVERIFY(!SameDataCheck::isSameData("just some text\n", "just some other text\n"));
     QVERIFY(!SameDataCheck::isSameData("same text\n", "same text\n"));
+}
+
+void TestSameDataCheck::secondRegionOutlineIsNeverSameData()
+{
+    // A real second outline: D02 to a new start, then D01 draws. The parser
+    // drops the second start point, so the region cannot be vouched for.
+    const QString region = "G36*\nX0Y0D02*\nX1000000Y0D01*\nX1000000Y1000000D01*\n"
+                           "X2000000Y2000000D02*\nX3000000Y2000000D01*\nX3000000Y3000000D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+}
+
+void TestSameDataCheck::altiumTrailingRegionMoveIsSameData()
+{
+    // Altium ends every region with a D02 and no D01 after it (real data Q1).
+    const QString region = "G36*\nX0Y0D02*\nX1000000Y0D01*\nX1000000Y1000000D01*\nX0Y0D01*\n"
+                           "X0Y0D02*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+}
+
+void TestSameDataCheck::unchangedRegionArcIsSameData()
+{
+    const QString region = "G75*\nG36*\nX0Y0D02*\nG01X1000000Y0D01*\n"
+                           "G03X1000000Y1000000I0J500000D01*\nG01X0Y0D01*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+}
+
+void TestSameDataCheck::changedRegionArcBulgeIsDifferent()
+{
+    const QString a = "G75*\nG36*\nX0Y0D02*\nG01X1000000Y0D01*\n"
+                      "G03X1000000Y1000000I0J500000D01*\nG01X0Y0D01*\nG37*\n";
+    QString b = a;
+    b.replace("I0J500000", "I-500000J500000");
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, a), gerber(kExportB, b)));
+}
+
+void TestSameDataCheck::bareCoordinateBeforeAnyOperationIsText()
+{
+    // The parser ignores coordinates before the first D01/D02/D03.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX1000000Y1000000*\nX0Y0D03*\n"),
+                                       gerber(kExportB, "D10*\nX3000000Y1000000*\nX0Y0D03*\n")));
+}
+
+void TestSameDataCheck::coordinateWithApertureCodeIsText()
+{
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX1000000Y0D10*\nX0Y0D03*\n"),
+                                       gerber(kExportB, "D10*\nX2000000Y0D10*\nX0Y0D03*\n")));
+}
+
+void TestSameDataCheck::oldStyleCodesAreSameData()
+{
+    // Unpadded/padded codes and the G54 prefix, in a file with shifted apertures.
+    const QString a = "G54D10*\nX1000000Y1000000D3*\nG1X0Y0D2*\nD11*\nX5000000Y0D001*\n";
+    QByteArray b = gerber(kExportB, a);
+    b.replace("%ADD10C,0.200*%", "%ADD12C,0.200*%");
+    b.replace("G54D10*", "G54D12*");
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, a), b));
+}
+
+void TestSameDataCheck::regionNotStartedByMoveIsNeverSameData()
+{
+    // The region's first statement draws (D01) instead of moving, so its
+    // start is the pen position from before G36. The parser does not record
+    // that point, and the move that set it is not compared as text.
+    const QString region = "G36*\nX1000000Y0D01*\nX1000000Y1000000D01*\nX0Y0D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX0Y0D03*\nX0Y0D02*\n" + region),
+                                       gerber(kExportB, "D10*\nX0Y0D03*\nX500000Y0D02*\n" + region)));
+}
+
+void TestSameDataCheck::repeatedRegionStartMoveIsNeverSameData()
+{
+    // Two moves before the first draw: the outline starts at the second one,
+    // but the parser records the first.
+    const QString region = "G36*\nX0Y0D02*\nX%1Y0D02*\nX1000000Y1000000D01*\nX0Y1000000D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("500000")),
+                                       gerber(kExportB, region.arg("600000"))));
+}
+
+void TestSameDataCheck::unclosedRegionIsNeverSameData()
+{
+    // No G37: the parser never emits the region, so its outline is lost.
+    const QString region = "D10*\nX0Y0D03*\nG36*\nX0Y0D02*\nX%1Y0D01*\nX1000000Y1000000D01*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("1000000")),
+                                       gerber(kExportB, region.arg("2000000"))));
+}
+
+void TestSameDataCheck::regionTooSmallToBeDrawnIsNeverSameData()
+{
+    // A full-circle region has only two vertices (start and end), so the
+    // parser emits nothing for it - the start move would be lost.
+    const QString region = "D10*\nX0Y0D03*\nG75*\nG36*\nX%1Y0D02*\nG03X0Y0I500000J0D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("0")),
+                                       gerber(kExportB, region.arg("1000000"))));
+}
+
+void TestSameDataCheck::arcWithXButNoYIsText()
+{
+    // Without a Y field the parser reads X's digits up to the end of the
+    // statement ("1000000I500000J0") and decodes nothing, so X is lost.
+    const QString body = "D10*\nX0Y0D02*\nG75*\nG03X%1I500000J0D01*\nG01*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, body.arg("1000000")),
+                                       gerber(kExportB, body.arg("2000000"))));
+}
+
+void TestSameDataCheck::modeSetWithOnlyArcOffsetsIsText()
+{
+    // A G-code followed only by I/J is a mode set to the parser; the offsets
+    // are not read.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, "D10*\nX0Y0D03*\nG02I100J0*\nG01*\n"),
+                                       gerber(kExportB, "D10*\nX0Y0D03*\nG02I200J0*\nG01*\n")));
 }
 
 void TestSameDataCheck::drillReexportWithNewJobUserDateIsSameData()

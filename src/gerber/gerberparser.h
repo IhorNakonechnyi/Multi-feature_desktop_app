@@ -34,9 +34,12 @@ QPainterPath parseContent(const QString &content);
 
 // Every statement in the file that is NOT captured by the object model,
 // in file order, minus G04 comments, %TO/%TD object labels and volatile X2
-// file attributes (see exportnoise.h). Geometry statements (coordinates, D-codes, aperture
-// selects) and %AD aperture definitions are left out - they are compared
-// through the parsed objects instead. Comments are left out because they
+// file attributes (see exportnoise.h). Geometry statements (draws, moves,
+// flashes, aperture selects) and %AD aperture definitions are left out - they
+// are compared through the parsed objects instead. A geometry statement is
+// left out only in a form the parser fully reads into objects (fields in
+// G/X/Y/I/J order, I/J only on an arc draw outside a region, bare coordinates
+// only after a known operation); any other form is kept as text. Comments are left out because they
 // never affect the image. %LN and %IN (layer/image names) and %IPPOS (the
 // default polarity) are left out too: they differ per export and draw nothing.
 //
@@ -46,7 +49,10 @@ QPainterPath parseContent(const QString &content);
 //
 // Unknown means no answer: any other % directive (%LR, %LM, %SF, %IPNEG, a
 // stray primitive outside %AM, ...) and G91 (incremental coordinates) make
-// the result std::nullopt. The parser ignores or does not read these, and
+// the result std::nullopt. So does a region whose outline the parser cannot
+// record exactly (a second outline after a D02, a start that is not a D02
+// move, a flash, an unreadable statement, fewer than 3 vertices, no G37).
+// The parser ignores or does not read these, and
 // where they sit relative to the objects is not compared, so equal text in
 // both files proves nothing. A file with std::nullopt is never the same
 // data. Used by SameDataCheck.

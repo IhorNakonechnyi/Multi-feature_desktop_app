@@ -9,6 +9,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QPolygonF>
+#include <QRegularExpression>
 #include <QTextStream>
 
 #include "exportnoise.h"
@@ -836,6 +837,222 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
     return layer;
 }
 
+// ---------------------------------------------------------------------------
+// Same-data check: which plain statements are fully captured as objects
+// ---------------------------------------------------------------------------
+//
+// nonGeometryStatements may leave a plain statement out of its list only if
+// the parse loop above records everything the statement means in the object
+// model. The forms below mirror that loop branch by branch. Anything that
+// does not fit one of them exactly is kept as text instead, which is always
+// safe: a missing form only costs a pair that stays yellow, never a wrong
+// green.
+
+// What the walk remembers between statements, in file order - the parts of
+// the parse loop's own state that decide how a statement is read.
+struct GeometryWalk {
+    // G01 = linear, G02/G03 = arc. The parse loop starts linear.
+    bool arcInterpolation = false;
+    // True once a D01/D02/D03 has been met whose code we know for certain.
+    // Before that, bare coordinates ("X..Y..*" with no D) are ignored by the
+    // parser; after a statement whose effect on the parser's modal
+    // operation we cannot be sure of, we fall back to false as well.
+    bool operationSeen = false;
+    int modalOperation = 0; // the D01/D02/D03 bare coordinates repeat
+    bool insideRegion = false; // between G36 and G37
+    // Region outline bookkeeping (see the region rule in classifyPlain).
+    bool regionStarted = false;         // the region's first operation (a D02) was met
+    bool regionMovedAfterStart = false; // a further D02 came after that
+    int regionVertexCount = 0;          // vertices the parser will record
+};
+
+enum class PlainVerdict {
+    Geometry,   // fully captured in the objects - leave it out of the list
+    KeepAsText, // compare it as text
+    Refuse,     // the file cannot be vouched for at all (std::nullopt)
+};
+
+// The fields of a coordinate statement, in the only order the parser
+// decodes correctly: optional G01/G02/G03, then X, Y, I, J (each optional).
+// Capture groups: 1 = G-code, 2 = X, 3 = Y, 4 = I, 5 = J. Each value is an
+// optional sign and digits; the digit count is capped so the value always
+// fits the parser's integer decode (a longer string fails to convert and
+// silently reads as 0).
+QString coordinateFieldsPattern()
+{
+    return QStringLiteral("(G0[123])?(X%1)?(Y%1)?(I%1)?(J%1)?").arg(QStringLiteral("[+-]?\\d{1,12}"));
+}
+
+// "aperture select": D10 and up, optionally after the G54 prefix. The parse
+// loop strips G54 and stores the code as the current aperture, which every
+// later object carries. (The cap keeps the code inside an int.)
+const QRegularExpression kApertureSelectForm(QStringLiteral("^(G54)?D0*[1-9]\\d{1,7}$"));
+// "operation": the fields, then D01/D02/D03 with any number of leading
+// zeros (group 6). The parser takes the number after the last D.
+const QRegularExpression kOperationForm(QLatin1Char('^') + coordinateFieldsPattern()
+                                        + QStringLiteral("D0*([123])$"));
+// "modal coordinates": the same fields without a D-code; the parser repeats
+// its modal operation for them.
+const QRegularExpression kModalCoordinatesForm(QLatin1Char('^') + coordinateFieldsPattern() + QLatin1Char('$'));
+
+// Decides one plain statement (already G-code-normalized, G04 and G91
+// handled by the caller) and updates the walk state the way the parse loop
+// would update its own.
+PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
+{
+    // Interpolation mode. The parse loop strips a leading G74/G75 and then a
+    // G54/G55 prefix, and then takes G01/G02/G03 as the new mode - whether
+    // the statement also carries coordinates or not. Do the same for every
+    // statement, geometry or text, so the arc rule below sees the mode the
+    // parser will use.
+    QString view = plain;
+    if (view.startsWith(QLatin1String("G74")) || view.startsWith(QLatin1String("G75"))) {
+        view = view.mid(3);
+    }
+    if (view.startsWith(QLatin1String("G54")) || view.startsWith(QLatin1String("G55"))) {
+        view = view.mid(3);
+    }
+    if (view.startsWith(QLatin1String("G01"))) {
+        walk.arcInterpolation = false;
+    } else if (view.startsWith(QLatin1String("G02")) || view.startsWith(QLatin1String("G03"))) {
+        walk.arcInterpolation = true;
+    }
+
+    // G36 / G37: kept as text (as before), but they open and close the
+    // region the outline rule below watches.
+    if (plain.startsWith(QLatin1String("G36"))) {
+        // A second G36 inside an open region makes the parser throw the
+        // open region's vertices away - that outline would be lost.
+        if (walk.insideRegion && walk.regionStarted) {
+            return PlainVerdict::Refuse;
+        }
+        walk.insideRegion = true;
+        walk.regionStarted = false;
+        walk.regionMovedAfterStart = false;
+        walk.regionVertexCount = 0;
+        return PlainVerdict::KeepAsText;
+    }
+    if (plain.startsWith(QLatin1String("G37"))) {
+        // The parser emits a region only with 3 or more vertices; with fewer
+        // it emits nothing, and the statements we left out (the start move)
+        // would vanish. A full-circle arc region is the realistic case.
+        if (walk.insideRegion && walk.regionStarted && walk.regionVertexCount < 3) {
+            return PlainVerdict::Refuse;
+        }
+        walk.insideRegion = false;
+        return PlainVerdict::KeepAsText;
+    }
+
+    if (kApertureSelectForm.match(plain).hasMatch()) {
+        return PlainVerdict::Geometry; // does not touch the operation state
+    }
+
+    // Work out the statement's operation (D01/D02/D03), if we can know it.
+    int operation = 0;
+    QRegularExpressionMatch fields;
+    const QRegularExpressionMatch explicitOp = kOperationForm.match(plain);
+    if (explicitOp.hasMatch()) {
+        operation = explicitOp.captured(6).toInt();
+        fields = explicitOp;
+    } else {
+        const QRegularExpressionMatch modal = kModalCoordinatesForm.match(plain);
+        const bool hasAnyField = modal.hasMatch()
+            && (modal.hasCaptured(2) || modal.hasCaptured(3) || modal.hasCaptured(4) || modal.hasCaptured(5));
+        // With a G prefix the parser looks only for X, Y or D before it
+        // treats the rest as coordinates; "G02I5J5" is just a mode set, and
+        // its offsets are not read.
+        const bool parserReadsIt = hasAnyField && (!modal.hasCaptured(1) || modal.hasCaptured(2)
+                                                   || modal.hasCaptured(3));
+        // Bare coordinates repeat the modal operation - which we only know
+        // after an operation we are sure of.
+        if (parserReadsIt && walk.operationSeen) {
+            operation = walk.modalOperation;
+            fields = modal;
+        }
+    }
+
+    if (operation == 0) {
+        // Not a form we understand. If it still looks like a coordinate or
+        // D-code command (X..D10, D05, a misordered field, ...), the parser
+        // may have read it and changed its modal operation in a way we
+        // cannot follow - so stop trusting bare coordinates until the next
+        // operation we are sure of.
+        const bool looksLikeCommand = view.contains(QLatin1Char('X')) || view.contains(QLatin1Char('Y'))
+            || view.contains(QLatin1Char('I')) || view.contains(QLatin1Char('J'))
+            || view.contains(QLatin1Char('D'));
+        if (looksLikeCommand) {
+            walk.operationSeen = false;
+            // Inside a region it could be a hidden move that starts a
+            // second outline, which the outline rule must see.
+            if (walk.insideRegion) {
+                return PlainVerdict::Refuse;
+            }
+        }
+        return PlainVerdict::KeepAsText;
+    }
+
+    // From here the operation is known, whether or not the statement ends
+    // up as geometry, so the parser's modal operation is known too.
+    if (explicitOp.hasMatch()) {
+        walk.modalOperation = operation;
+        walk.operationSeen = true;
+    }
+
+    const bool hasX = fields.hasCaptured(2);
+    const bool hasY = fields.hasCaptured(3);
+    const bool hasOffset = fields.hasCaptured(4) || fields.hasCaptured(5);
+    const bool isBare = !hasX && !hasY && !hasOffset; // "D01*" with no fields
+
+    // The region outline rule. Inside G36..G37 the parser records the
+    // destination of the region's first operation as the start vertex and
+    // then one vertex per D01 - every later D02 is dropped. That is exact
+    // for the usual outline, and for Altium's, which ends every region with
+    // a D02 that no D01 follows:
+    //     G36 -> D02 (start) -> D01 x N -> D02 -> G37
+    // A D02 is harmless as long as no D01 comes after it. A D01 after it
+    // starts a real second outline, joined by the parser onto the first -
+    // that is what refuses. The first operation must be a D02 with
+    // coordinates: a D01 there starts from the pen position before G36,
+    // which the parser does not record, and a bare "D02*" does not reach
+    // the region code at all. A D03 (flash) is not allowed in a region and
+    // the parser ignores it.
+    if (walk.insideRegion) {
+        if (operation == 3) {
+            return PlainVerdict::Refuse;
+        }
+        if (!walk.regionStarted) {
+            if (operation != 2 || isBare) {
+                return PlainVerdict::Refuse;
+            }
+            walk.regionStarted = true;
+            walk.regionVertexCount = 1;
+        } else if (operation == 2) {
+            walk.regionMovedAfterStart = true;
+        } else { // D01
+            if (walk.regionMovedAfterStart) {
+                return PlainVerdict::Refuse;
+            }
+            if (!isBare) { // a bare D01 does not reach the region code
+                ++walk.regionVertexCount;
+            }
+        }
+    }
+
+    // Only now decide geometry or text: everything the statement says must
+    // reach an object.
+    // - Without a Y field the parser reads X's digits up to the end of the
+    //   statement, so "X5I3J4" loses X when offsets follow.
+    if (hasX && !hasY && hasOffset) {
+        return PlainVerdict::KeepAsText;
+    }
+    // - I/J are read only for an arc draw (D01 in G02/G03 mode) outside a
+    //   region; inside a region only end points are recorded.
+    if (hasOffset && (operation != 1 || !walk.arcInterpolation || walk.insideRegion)) {
+        return PlainVerdict::KeepAsText;
+    }
+    return PlainVerdict::Geometry;
+}
+
 } // namespace
 
 Layer GerberParser::parseContentToObjects(const QString &content)
@@ -855,6 +1072,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
 {
     QStringList kept;
     bool inMacro = false; // true while the statements after a %AM header are its body
+    GeometryWalk walk;    // parser state the plain-statement forms depend on
     for (const GerberStatement &statement : tokenize(content)) {
         const QString &text = statement.text;
         // A macro body runs from the %AM header to the first statement of
@@ -956,14 +1174,23 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         if (plain.contains(QLatin1String("G91"))) {
             return std::nullopt;
         }
-        // Anything carrying coordinates or a D-code is geometry (a draw,
-        // move, flash or aperture select) and lives in the object model.
-        const bool isGeometry = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
-            || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'))
-            || text.contains(QLatin1Char('D'));
-        if (!isGeometry) {
-            kept << plain; // G01/G36/G75/G90/M02 ... - kept in order
+        // Geometry (a draw, move, flash or aperture select) is left out only
+        // in the forms the parser fully reads into objects; everything else
+        // (G01/G36/G75/G90/M02, odd coordinate forms ...) is kept in order.
+        switch (classifyPlain(plain, walk)) {
+        case PlainVerdict::Geometry:
+            break;
+        case PlainVerdict::KeepAsText:
+            kept << plain;
+            break;
+        case PlainVerdict::Refuse:
+            return std::nullopt;
         }
+    }
+    // A region never closed by G37 is never emitted by the parser, so its
+    // outline would be lost.
+    if (walk.insideRegion && walk.regionStarted) {
+        return std::nullopt;
     }
     return kept;
 }
