@@ -106,6 +106,8 @@ private slots:
     void strayMacroPrimitiveIsNeverSameData();
     void macroRenamedWithShiftedApertureIsSameData();
     void changedMacroRecipeIsDifferent();
+    void redefinedMacroIsNeverSameData();
+    void unusedMacroDifferenceIsSameData();
     void layerWithNoObjectsIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
@@ -401,6 +403,26 @@ void TestSameDataCheck::changedMacroRecipeIsDifferent()
     const QString b = "%AMBOX*\n21,1,$1,$2,0,0,45*%\n%ADD37BOX,1X2*%\n";
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + a, "D37*\nX0Y0D03*\n"),
                                        gerber(kExportB + b, "D37*\nX0Y0D03*\n")));
+}
+
+void TestSameDataCheck::redefinedMacroIsNeverSameData()
+{
+    // The parser keeps only the last definition of a name, so file A's first
+    // aperture is declared with recipe 1 in the source but resolves to recipe 2.
+    const QString a = "%AMBOX*\n21,1,$1,$2,0,0,0*%\n%ADD10BOX,1X2*%\n"
+                      "%AMBOX*\n21,1,$1,$2,0,0,45*%\n%ADD11BOX,1X2*%\n";
+    const QString b = "%AMBOX*\n21,1,$1,$2,0,0,45*%\n%ADD10BOX,1X2*%\n%ADD11BOX,1X2*%\n";
+    const QString draw = "D10*\nX0Y0D03*\nD11*\nX1000000Y0D03*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + a, draw), gerber(kExportB + b, draw)));
+}
+
+void TestSameDataCheck::unusedMacroDifferenceIsSameData()
+{
+    // An unused macro draws nothing, so defining one extra changes no image.
+    const QString base = "%AMBOX*\n21,1,$1,$2,0,0,0*%\n%ADD37BOX,1X2*%\n";
+    const QString a = "%AMUNUSED*\n1,1,0.5,0,0*%\n" + base;
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + a, "D37*\nX0Y0D03*\n"),
+                                      gerber(kExportB + base, "D37*\nX0Y0D03*\n")));
 }
 
 void TestSameDataCheck::unknownUnitOrPolarityCodeIsNeverSameData()

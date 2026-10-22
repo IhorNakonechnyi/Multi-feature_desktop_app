@@ -9,6 +9,7 @@
 #include <QHash>
 #include <QPointF>
 #include <QPolygonF>
+#include <QSet>
 #include <QRegularExpression>
 #include <QTextStream>
 
@@ -1071,6 +1072,7 @@ QPainterPath GerberParser::parseContent(const QString &content)
 std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content)
 {
     QStringList kept;
+    QSet<QString> macroNames; // macro names already defined in this file
     bool inMacro = false; // true while the statements after a %AM header are its body
     GeometryWalk walk;    // parser state the plain-statement forms depend on
     for (const GerberStatement &statement : tokenize(content)) {
@@ -1119,6 +1121,14 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             // nothing. inMacro is still tracked so a stray primitive outside
             // a macro falls through to the refuse group below.
             if (text.startsWith(QLatin1String("AM"))) {
+                // The parser keeps only the last definition of a name, so a
+                // redefinition hides which recipe an earlier aperture was
+                // declared with - refuse.
+                const QString name = text.mid(2);
+                if (macroNames.contains(name)) {
+                    return std::nullopt;
+                }
+                macroNames.insert(name);
                 inMacro = true;
                 continue;
             }
