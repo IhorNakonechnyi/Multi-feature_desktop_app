@@ -104,6 +104,8 @@ private slots:
     void strayPrimitiveAfterPlainStatementIsNeverSameData();
     void unknownUnitOrPolarityCodeIsNeverSameData();
     void strayMacroPrimitiveIsNeverSameData();
+    void macroRenamedWithShiftedApertureIsSameData();
+    void changedMacroRecipeIsDifferent();
     void layerWithNoObjectsIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
@@ -379,6 +381,26 @@ void TestSameDataCheck::strayPrimitiveAfterPlainStatementIsNeverSameData()
     // A plain statement ends the macro body, so the later primitive is stray.
     const QString extra = "%AMFOO*1,1,0.5,0,0*%\nG01*\n%1,1,0.5,0,0*%\n";
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + extra), gerber(kExportB + extra)));
+}
+
+void TestSameDataCheck::macroRenamedWithShiftedApertureIsSameData()
+{
+    // Altium names macros after their D-code, so a shifted aperture renames
+    // the macro and reorders the definitions (real data, pair test1).
+    const QString a = "%AMROUNDEDRECTD37*\n21,1,$1,$2,0,0,0*%\n%AMROUNDEDRECTD38*\n1,1,$1,0,0*%\n"
+                      "%ADD37ROUNDEDRECTD37,1X2*%\n%ADD38ROUNDEDRECTD38,0.5*%\n";
+    const QString b = "%AMROUNDEDRECTD40*\n1,1,$1,0,0*%\n%AMROUNDEDRECTD41*\n21,1,$1,$2,0,0,0*%\n"
+                      "%ADD40ROUNDEDRECTD40,0.5*%\n%ADD41ROUNDEDRECTD41,1X2*%\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + a, "D37*\nX0Y0D03*\nD38*\nX1000000Y0D03*\n"),
+                                      gerber(kExportB + b, "D41*\nX0Y0D03*\nD40*\nX1000000Y0D03*\n")));
+}
+
+void TestSameDataCheck::changedMacroRecipeIsDifferent()
+{
+    const QString a = "%AMBOX*\n21,1,$1,$2,0,0,0*%\n%ADD37BOX,1X2*%\n";
+    const QString b = "%AMBOX*\n21,1,$1,$2,0,0,45*%\n%ADD37BOX,1X2*%\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + a, "D37*\nX0Y0D03*\n"),
+                                       gerber(kExportB + b, "D37*\nX0Y0D03*\n")));
 }
 
 void TestSameDataCheck::unknownUnitOrPolarityCodeIsNeverSameData()

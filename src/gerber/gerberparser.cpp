@@ -1110,18 +1110,24 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 continue;
             }
 
-            // Group 2 - KEEP: directives the parser understands (or labels
-            // that describe the file); they must be equal in both files.
-            // A macro body line is kept too while we are inside %AM.
+            // Macro definitions (the %AM header and its body lines) are
+            // skipped too. Altium names a macro after its D-code, so a
+            // re-export that shifts aperture numbers renames and reorders
+            // the definitions without changing the image. Each macro that is
+            // actually used is compared by its recipe through the aperture
+            // key (layerequivalence.cpp, apertureKey); an unused macro draws
+            // nothing. inMacro is still tracked so a stray primitive outside
+            // a macro falls through to the refuse group below.
             if (text.startsWith(QLatin1String("AM"))) {
                 inMacro = true;
-                kept << QLatin1Char('%') + text;
                 continue;
             }
             if (inMacro) {
-                kept << QLatin1Char('%') + text;
                 continue;
             }
+
+            // Group 2 - KEEP: directives the parser understands (or labels
+            // that describe the file); they must be equal in both files.
             if (text.startsWith(QLatin1String("FS"))) {
                 // "FSLA..." / "FSTA...": the character after the
                 // zero-suppression letter is the notation, A = absolute.

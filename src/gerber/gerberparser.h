@@ -43,7 +43,11 @@ QPainterPath parseContent(const QString &content);
 // never affect the image. %LN and %IN (layer/image names) and %IPPOS (the
 // default polarity) are left out too: they differ per export and draw nothing.
 //
-// Kept (must be equal): %FS %MO %SR %LP %TF %TA, %AM with its macro body,
+// Macro definitions (%AM and its body) are left out too: Altium names macros
+// after their D-code, and each used macro is compared by its recipe through
+// the aperture key instead.
+//
+// Kept (must be equal): %FS %MO %SR %LP %TF %TA,
 // and plain statements such as G01/G36/G75/G90/M02 (a one-digit G-code is
 // written with its leading zero, so G1 and G01 compare equal).
 //
