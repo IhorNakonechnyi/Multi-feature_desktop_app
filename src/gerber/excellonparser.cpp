@@ -351,6 +351,9 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
     // The header ends at '%' or M95, exactly where the parser stops reading
     // unit lines (its headerDone flag).
     bool headerDone = false;
+    // The unit the parser is using at this point: inch until a header
+    // INCH/METRIC line says otherwise (its default, GerberFormat).
+    bool unitIsInch = true;
     QSet<int> definedTools; // tool numbers that already have a diameter
     // Case-insensitive whole-line test, the way the parser compares its
     // M/G command lines.
@@ -401,22 +404,24 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
             return std::nullopt;
         }
         // A line is left out as geometry only when the WHOLE line is in a
-        // form the parser really reads. Anything else (a G85 slot, an I/J
-        // offset on a straight G01, any form we did not foresee) falls
-        // through and is compared as text, so a difference the object model
-        // cannot see still shows up. I/J are only read on arcs (G02/G03).
+        // form the parser really reads. Anything else falls through to the
+        // allow-list below: a G85 slot or a G00-G03 line the forms here did
+        // not take (an I/J offset on a straight G01) is kept and compared as
+        // text; every other line refuses unless the allow-list names it.
+        // I/J are only read on arcs (G02/G03).
         // A number must be well formed: optional sign, then digits with an
         // optional point, or a point followed by digits. A loose pattern would
         // accept "1.0.5", which toDouble reads as 0, so two different
         // malformed values would look identical in the object model. A
-        // malformed number fails the match and the line stays compared as text.
+        // malformed number fails the match, is not on the allow-list, and so
+        // makes the whole file refuse.
         // The digit counts are capped too, so two different numbers can never
         // decode to the same hole: without a point, at most 12 digits (the
         // same cap as the Gerber side - it always fits the integer decode);
         // with a point, at most 6 digits on each side, so the value stays
         // exact in a double and a change in the last digit (1 nm in mm) still
         // moves the hole after rounding to nanometres. A longer number fails
-        // the match and stays text.
+        // the match and makes the file refuse.
         static const QString num = QStringLiteral("[+-]?(?:\\d{1,12}|\\d{1,6}\\.\\d{0,6}|\\.\\d{1,6})");
         static const QRegularExpression holeOrModalMove(
             QStringLiteral("^(X%1)?(Y%1)?$").arg(num));
@@ -471,6 +476,22 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         if (line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive)
             || line.startsWith(QLatin1String("METRIC"), Qt::CaseInsensitive)) {
             if (headerDone) {
+                return std::nullopt;
+            }
+            unitIsInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);
+            kept << line;
+            continue;
+        }
+        // M71 (metric) / M72 (inch): the parser ignores both. Eagle writes M72
+        // at the top of its drill files with no INCH line, and older KiCad
+        // writes M71/M72 after the '%'. Such a command changes nothing only
+        // when it names the unit the parser is already using at that point;
+        // one that names the other unit means the holes are in a unit the
+        // parser never switched to, so the pair refuses.
+        const bool isM71 = lineIs(line, "M71");
+        const bool isM72 = lineIs(line, "M72");
+        if (isM71 || isM72) {
+            if (isM72 != unitIsInch) {
                 return std::nullopt;
             }
             kept << line;

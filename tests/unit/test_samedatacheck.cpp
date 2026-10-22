@@ -149,11 +149,14 @@ private slots:
     void drillUnchangedSlotIsSameData();
     void drillRepeatCommandIsNeverSameData();
     void drillRoutWithOffsetOnLinearMoveIsText();
-    void drillMalformedCoordinateIsText();
-    void drillOverlongNumberIsText();
+    void drillMalformedCoordinateIsNeverSameData();
+    void drillOverlongNumberIsNeverSameData();
     void altiumDrillHeaderIsSameData();
     void drillIncrementalModeIsNeverSameData();
     void drillUnitSwitchAfterHeaderIsNeverSameData();
+    void drillAgreeingUnitCommandIsSameData();
+    void drillInchCommandWithoutUnitLineIsSameData();
+    void drillDisagreeingUnitCommandIsNeverSameData();
     void drillUnknownCommandIsNeverSameData();
     void redefinedDrillToolIsNeverSameData();
 
@@ -745,18 +748,20 @@ void TestSameDataCheck::drillRoutWithOffsetOnLinearMoveIsText()
                                        drill(kDrillExportB, "T01C0.300\n", routB)));
 }
 
-void TestSameDataCheck::drillMalformedCoordinateIsText()
+void TestSameDataCheck::drillMalformedCoordinateIsNeverSameData()
 {
-    // "1.0.5" is not a number; the parser reads it as 0, so it must stay
-    // compared as text rather than be trusted as a hole.
+    // "1.0.5" is not a number; the parser reads it as 0, so two different
+    // malformed values would look the same in the object model. The line
+    // fails the hole match and is not on the allow-list, so the pair refuses.
     QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0.5Y2.0\n"),
                                        drill(kDrillExportB, "T01C0.300\n", "X1.0.7Y2.0\n")));
 }
 
-void TestSameDataCheck::drillOverlongNumberIsText()
+void TestSameDataCheck::drillOverlongNumberIsNeverSameData()
 {
     // 20 digits: more than a double holds, so the two values decode to the
-    // same hole although the text differs. Such a number must stay text.
+    // same hole although the text differs. The number fails the hole match
+    // and is not on the allow-list, so the pair refuses.
     QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "X1.0000000000000000001Y2.250\n"),
                                        drill(kDrillExportB, "T01C0.300\n", "X1.0000000000000000002Y2.250\n")));
 }
@@ -802,6 +807,35 @@ void TestSameDataCheck::drillUnitSwitchAfterHeaderIsNeverSameData()
                                             drill(kDrillExportB, "T01C0.300\n", holes)),
                  qPrintable(unitSwitch));
     }
+}
+
+void TestSameDataCheck::drillAgreeingUnitCommandIsSameData()
+{
+    // The file says METRIC in the header; an M71 after it says the same, so it
+    // changes nothing the parser does.
+    const QString holes = "M71\nX1.500Y2.250\nX3.000Y2.250\n";
+    QVERIFY(SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", holes),
+                                      drill(kDrillExportB, "T01C0.300\n", holes)));
+}
+
+void TestSameDataCheck::drillInchCommandWithoutUnitLineIsSameData()
+{
+    // No INCH/METRIC line: the parser's default is inch, and M72 agrees.
+    const QString file = "M48\n%1T01C0.0118\n%\nM72\nT01\nX1.5Y2.25\nM30\n";
+    QVERIFY(SameDataCheck::isSameData(file.arg(";date: 2026-10-01\n").toUtf8(),
+                                      file.arg(";date: 2026-10-20\n").toUtf8()));
+}
+
+void TestSameDataCheck::drillDisagreeingUnitCommandIsNeverSameData()
+{
+    // M72 (inch) before the header end in a METRIC file.
+    const QString metricFile = "M48\n%1METRIC,TZ\nM72\nT01C0.300\n%\nT01\nX1.5Y2.25\nM30\n";
+    QVERIFY(!SameDataCheck::isSameData(metricFile.arg(";date: 2026-10-01\n").toUtf8(),
+                                       metricFile.arg(";date: 2026-10-20\n").toUtf8()));
+    // M71 (metric) in a file with no unit line: the parser stays on inch.
+    const QString noUnitFile = "M48\n%1T01C0.0118\n%\nM71\nT01\nX1.5Y2.25\nM30\n";
+    QVERIFY(!SameDataCheck::isSameData(noUnitFile.arg(";date: 2026-10-01\n").toUtf8(),
+                                       noUnitFile.arg(";date: 2026-10-20\n").toUtf8()));
 }
 
 void TestSameDataCheck::drillUnknownCommandIsNeverSameData()
