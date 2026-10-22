@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include <QString>
+#include <QStringList>
 
 #include "gerberobjectmodel.h"
 
@@ -36,5 +37,15 @@ private:
 };
 
 Layer parseContentToObjects(const QString &content);
+
+// Every line NOT captured by the object model, in file order, minus export
+// noise (see exportnoise.h) - the drill counterpart of
+// GerberParser::nonGeometryStatements, with the same purpose. Left out:
+// lines with X/Y coordinates (holes and rout moves) and bare tool selects
+// ("T03"), whose effect is already in each object's aperture. Kept: the
+// header - unit/format lines, the tool table, comments such as FILE_FORMAT
+// or a plated/non-plated note - and any command the parser ignores. Stops
+// after M30/M00, exactly where the parser stops.
+QStringList nonGeometryLines(const QString &content);
 
 } // namespace ExcellonParser

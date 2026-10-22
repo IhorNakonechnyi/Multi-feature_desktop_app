@@ -1,11 +1,13 @@
 #include "excellonparser.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <QHash>
 #include <QObject>
 #include <QStringList>
 
+#include "exportnoise.h"
 #include "gerberaperture.h"
 #include "gerberformat.h"
 
@@ -339,4 +341,42 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     layer.objects = std::move(state.objects);
     layer.unitScale = state.format.unitsAreInches ? 25.4 : 1.0;
     return layer;
+}
+
+QStringList ExcellonParser::nonGeometryLines(const QString &content)
+{
+    QStringList kept;
+    for (const QString &rawLine : content.split(QLatin1Char('\n'))) {
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        if (line.startsWith(QLatin1Char(';'))) {
+            if (!ExportNoise::isVolatileComment(line.mid(1))) {
+                kept << line;
+            }
+            continue;
+        }
+        // Tool lines are checked before the X/Y test on purpose. Only a BARE
+        // select ("T03") is left out; anything else starting with T - a
+        // definition "T03C0.800", or "T03X..Y.." which the parser reads as a
+        // plain select and so draws nothing for - is kept, so a difference
+        // the object model cannot see still shows up here.
+        if (parseToolLine(line).isToolLine) {
+            const bool bareSelect = std::all_of(line.begin() + 1, line.end(), [](QChar c) { return c.isDigit(); });
+            if (!bareSelect) {
+                kept << line;
+            }
+            continue;
+        }
+        if (line.contains(QLatin1Char('X')) || line.contains(QLatin1Char('Y'))) {
+            continue; // a hole or a rout move - lives in the object model
+        }
+        kept << line;
+        if (line.compare(QLatin1String("M30"), Qt::CaseInsensitive) == 0
+            || line.compare(QLatin1String("M00"), Qt::CaseInsensitive) == 0) {
+            break; // the parser stops here too; whatever follows is never drawn
+        }
+    }
+    return kept;
 }

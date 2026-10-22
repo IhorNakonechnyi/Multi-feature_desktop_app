@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PcbSupplierWorkflow VERSION 1.8.5 LANGUAGES CXX)
+project(PcbSupplierWorkflow VERSION 1.8.6 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,6 +98,11 @@ add_executable(PcbSupplierWorkflow WIN32
     src/archivecompare/archivepanel.cpp
     src/archivecompare/gerberdifftrigger.h
     src/archivecompare/gerberdifftrigger.cpp
+    src/archivecompare/samedatacheck.h
+    src/archivecompare/samedatacheck.cpp
+    src/gerber/exportnoise.h
+    src/gerber/layerequivalence.h
+    src/gerber/layerequivalence.cpp
     src/gerber/gerberfiletype.h
     src/gerber/gerberfiletype.cpp
     src/gerber/gerberdiffrenderer.h

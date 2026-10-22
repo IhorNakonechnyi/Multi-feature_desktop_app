@@ -162,6 +162,26 @@ target_include_directories(test_excellonparser PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_excellonparser PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_excellonparser COMMAND test_excellonparser)
 
+# The re-export check: export-noise rules, both parsers' non-geometry line
+# lists, order-independent object comparison, and the pair collapse.
+add_executable(test_samedatacheck
+    test_samedatacheck.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatacheck.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/layerequivalence.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/excellonparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectpaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberformat.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberaperture.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerbermacro.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberexpression.cpp
+)
+target_include_directories(test_samedatacheck PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_samedatacheck PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME test_samedatacheck COMMAND test_samedatacheck)
+
 # Inspects the BUILT EXECUTABLE, not the source, for any linked networking
 # library - see the test file's own header for why a source grep is not
 # sufficient (Qt6::Pdf once pulled Qt6Network.dll in transitively without a

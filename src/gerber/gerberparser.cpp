@@ -11,6 +11,7 @@
 #include <QPolygonF>
 #include <QTextStream>
 
+#include "exportnoise.h"
 #include "gerberaperture.h"
 #include "gerberformat.h"
 #include "gerbermacro.h"
@@ -831,6 +832,48 @@ QPainterPath GerberParser::parseContent(const QString &content)
     double unitScale = 1.0; // discarded - objectPathMm reads Layer::unitScale, set by the parse
     const Layer layer = parseContentToObjectsInternal(content, unitScale);
     return flattenAndCompositeForLegacyRender(layer);
+}
+
+QStringList GerberParser::nonGeometryStatements(const QString &content)
+{
+    QStringList kept;
+    for (const GerberStatement &statement : tokenize(content)) {
+        const QString &text = statement.text;
+        if (statement.isParameterStatement) {
+            // %AD is compared through the objects (by aperture shape, not by
+            // its D-number), so it is the one directive left out. X2
+            // attributes are kept unless they are export noise.
+            if (text.startsWith(QLatin1String("AD")) || ExportNoise::isVolatileAttribute(text)) {
+                continue;
+            }
+            // %TO (net/component/pin labels on the objects that follow) and
+            // %TD (clears them) never change the image - re-annotating R12 to
+            // R15 or renaming a net moves no copper - so they are skipped too.
+            if (text.startsWith(QLatin1String("TO")) || text.startsWith(QLatin1String("TD"))) {
+                continue;
+            }
+            kept << QLatin1Char('%') + text;
+            continue;
+        }
+        // Same comment test as the parse loop above: only a literal "G04".
+        // A G04 comment never affects the image (Gerber spec), so ALL of them
+        // are skipped - not just known export noise. That includes the
+        // "G04 #@! TF..." form: an attribute hidden in a comment is still a
+        // comment. Every tool writes its own volatile comment lines, and a
+        // noise list would have to chase each one.
+        if (text.startsWith(QLatin1String("G04"))) {
+            continue;
+        }
+        // Anything carrying coordinates or a D-code is geometry (a draw,
+        // move, flash or aperture select) and lives in the object model.
+        const bool isGeometry = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
+            || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'))
+            || text.contains(QLatin1Char('D'));
+        if (!isGeometry) {
+            kept << text; // G01/G36/G75/G90/M02 ... - kept as-is, in order
+        }
+    }
+    return kept;
 }
 
 QPainterPath GerberParser::parseFile(const QString &filePath)

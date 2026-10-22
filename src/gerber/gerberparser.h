@@ -2,6 +2,7 @@
 
 #include <QPainterPath>
 #include <QString>
+#include <QStringList>
 
 #include "gerberobjectmodel.h"
 
@@ -28,6 +29,19 @@ Layer parseContentToObjects(const QString &content);
 // the object model existed. The signature and behavior are unchanged for
 // its callers.
 QPainterPath parseContent(const QString &content);
+
+// Every statement in the file that is NOT captured by the object model,
+// in file order, minus G04 comments, %TO/%TD object labels and volatile X2
+// file attributes (see exportnoise.h). Geometry statements (coordinates, D-codes, aperture
+// selects) and %AD aperture definitions are left out - they are compared
+// through the parsed objects instead. Comments are left out because they
+// never affect the image. Everything else stays: format/unit directives, X2
+// attributes such as .FileFunction, macro bodies, and any
+// directive this parser ignores when drawing (%LR, %IP, ...). That last
+// group is the point: two files can only be called "same data" if what the
+// parser does not understand is identical too, so an ignored directive can
+// never hide a real change. Used by SameDataCheck.
+QStringList nonGeometryStatements(const QString &content);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an

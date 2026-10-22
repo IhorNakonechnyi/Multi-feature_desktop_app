@@ -67,6 +67,12 @@ struct ArchiveComparisonResult {
     QVector<ArchiveEntry> entriesA;
     QVector<ArchiveEntry> entriesB;
     QVector<DifferingPair> differingPairs;
+
+    // Pairs whose bytes differ but whose data does not - typically a plain
+    // re-export that only rewrote date/user/job lines. Moved here out of
+    // differingPairs by SameDataCheck, their files shown green. Kept rather
+    // than dropped so the summary can still count them as identical.
+    QVector<DifferingPair> sameDataPairs;
 };
 
 Q_DECLARE_METATYPE(EntryClassification)

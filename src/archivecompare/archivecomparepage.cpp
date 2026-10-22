@@ -25,6 +25,7 @@
 #include "archivereader.h"
 #include "comparisonsummary.h"
 #include "gerberdifftrigger.h"
+#include "samedatacheck.h"
 
 namespace {
 
@@ -324,6 +325,23 @@ void ArchiveComparePage::runComparison()
     ComparisonSummary::resolveKinds(outcome.result.entriesA, readHeadA);
     ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
 
+    // A re-exported but unchanged file differs only in its date/user/job
+    // lines, so its CRC differs and it arrives here yellow. Parse each
+    // Gerber/drill pair once and move the ones carrying the same data back to
+    // green, before anything is shown or counted (samedatacheck.h). Needs
+    // whole files, unlike the head-only reads above. Synchronous, like the
+    // rest of the compare - its time is part of the compare time shown.
+    QElapsedTimer sameDataTimer;
+    sameDataTimer.start();
+    SameDataCheck::collapseSameDataPairs(outcome.result, [this](const DifferingPair &pair) {
+        bool foundA = false;
+        bool foundB = false;
+        const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
+        const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
+        return foundA && foundB && SameDataCheck::isSameData(bytesA, bytesB);
+    });
+    const qint64 sameDataMs = sameDataTimer.elapsed();
+
     const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
     summaryLabel_->setText(ComparisonSummary::formatSummaryLine(summary));
 
@@ -340,7 +358,7 @@ void ArchiveComparePage::runComparison()
     // below - this IS the value to show, not a placeholder: rendering only
     // happens once the user selects a pair, but the compare itself is
     // already done.
-    compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs));
+    compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs + sameDataMs));
 
     // Content, not extension, decides which pairs the overlay can draw
     // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
