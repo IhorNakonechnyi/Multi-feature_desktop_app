@@ -48,6 +48,8 @@ private slots:
     void singleQuadrantArcResolvesUnsignedCenterOffsets();
     void macroBodyStopsAtApertureAttribute();
     void macroClosedOnItsOwnLineKeepsItsPrimitive();
+    void arcWithOnlyXKeepsItsX();
+    void regionArcWithOnlyXKeepsItsX();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -914,6 +916,52 @@ void TestGerberParser::macroClosedOnItsOwnLineKeepsItsPrimitive()
     QVERIFY(layer.macros.contains("OC8"));
     QCOMPARE(layer.macros.value("OC8").statements, QStringList({"5,1,8,0,0,1.08239X$1,22.5"}));
     QCOMPARE(layer.objects.size(), 1);
+}
+
+void TestGerberParser::arcWithOnlyXKeepsItsX()
+{
+    // "X..I..J..D01" with no Y: X must stop at the I, not swallow the
+    // offsets (which made it unreadable, so it silently became 0). Half
+    // circle from (5,0) to (-5,0) about the origin.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.1*%\n"
+        "D10*\n"
+        "G75*\n"
+        "X050000Y000000D02*\n"
+        "G03X-050000I-050000J000000D01*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).strokeTo.x, GerberFormat::mmToNm(-5.0));
+    QCOMPARE(layer.objects.at(0).strokeTo.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::regionArcWithOnlyXKeepsItsX()
+{
+    // The same form as a region edge - a corner read as X=0 twists the
+    // outline. Square (1,1)-(5,5) whose top edge is an arc to (1,5).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G75*\n"
+        "G36*\n"
+        "X010000Y010000D02*\n"
+        "G01X050000Y010000D01*\n"
+        "X050000Y050000D01*\n"
+        "G03X010000I-020000J000000D01*\n"
+        "G01X010000Y010000D01*\n"
+        "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const QVector<PointNm> &points = layer.objects.at(0).regionPoints;
+    QCOMPARE(points.size(), 5);
+    QCOMPARE(points.at(3).x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(points.at(3).y, GerberFormat::mmToNm(5.0));
 }
 
 QTEST_MAIN(TestGerberParser)

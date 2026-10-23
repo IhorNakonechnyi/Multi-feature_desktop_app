@@ -441,7 +441,11 @@ void applyCoordinateToken(const QString &token, const GerberFormat &format, QPoi
     const int xIndex = token.indexOf(QLatin1Char('X'));
     const int yIndex = token.indexOf(QLatin1Char('Y'));
     if (xIndex >= 0) {
-        const int end = (yIndex > xIndex) ? yIndex : token.length();
+        // Bounded by the next field letter (Y, or the I of an arc with no
+        // Y). Running to the end of the token made "X..I..J.." unreadable,
+        // and an unreadable number decodes as 0 - a region corner then
+        // jumped to X=0 and twisted the outline.
+        const int end = nextUppercaseIndex(token, xIndex + 1);
         point.setX(format.decodeCoordinateMm(token.mid(xIndex + 1, end - xIndex - 1)));
     }
     if (yIndex >= 0) {
@@ -1069,8 +1073,9 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
 
     // Only now decide geometry or text: everything the statement says must
     // reach an object.
-    // - Without a Y field the parser reads X's digits up to the end of the
-    //   statement, so "X5I3J4" loses X when offsets follow.
+    // - X with offsets but no Y ("X5I3J4"): before 1.8.8 the parser lost X
+    //   here (read as 0). It reads it now, but the form stays text: that
+    //   costs at most a false yellow, and leaving it out is a separate decision.
     if (hasX && !hasY && hasOffset) {
         return PlainVerdict::KeepAsText;
     }
