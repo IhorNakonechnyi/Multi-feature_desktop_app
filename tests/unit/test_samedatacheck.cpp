@@ -3,6 +3,7 @@
 #include "archivecompare/archivecomparisonresult.h"
 #include "archivecompare/comparisonsummary.h"
 #include "archivecompare/samedatacheck.h"
+#include "archivecompare/samedatadiagnosis.h"
 #include "gerber/exportnoise.h"
 
 // Covers the re-export check end to end. Most cases are of one shape: take a
@@ -173,6 +174,13 @@ private slots:
     void pairWithUnknownPathIsNeverOffered();
     void nonLayerPairIsNeverOfferedToTheCheck();
     void summaryCountsSameDataPairAsIdentical();
+
+    // Diagnostics (1.8.7 test round, samedatadiagnosis.h)
+    void diagnosisShapesHideEveryValue();
+    void diagnosisNamesTheRefusalRule();
+    void diagnosisSeesReorderedRegionArcs();
+    void diagnosisCountsObjectDifferences();
+    void diagnosisPassesForSameData();
 };
 
 void TestSameDataCheck::noiseWordsMatchOnlyAsTheFirstWholeWord()
@@ -1096,6 +1104,71 @@ void TestSameDataCheck::summaryCountsSameDataPairAsIdentical()
     QCOMPARE(summary.gerber.identicalClasses, 1);
     QCOMPARE(summary.gerber.pairs, 0);
     QVERIFY(summary.fullyIdentical());
+}
+
+void TestSameDataCheck::diagnosisShapesHideEveryValue()
+{
+    // The diagnostic text is pasted into conversations about real files, so
+    // a shape keeps syntax and drops every value and name.
+    using SameDataDiagnosis::shapeOf;
+    QCOMPARE(shapeOf("G03X1200Y-50I3J0D01", true), QString("G03X#Y#I#J#D01"));
+    QCOMPARE(shapeOf("G54D23", true), QString("G54D#"));
+    QCOMPARE(shapeOf("M02", true), QString("M02"));
+    QCOMPARE(shapeOf("%TF.FileFunction,Copper,L1,Top", true), QString("%TF.FileFunction,..."));
+    QCOMPARE(shapeOf("%TF.ProjectName,SECRET123", true), QString("%TF.ProjectName,..."));
+    QCOMPARE(shapeOf("%TFMyOwnLabel,ACME", true), QString("%TF<custom>,..."));
+    QCOMPARE(shapeOf("%ADD23ROUNDEDRECTD23,0.1X0.2", true), QString("%ADD#<macro>,..."));
+    QCOMPARE(shapeOf("%ADD10C,0.200", true), QString("%ADD#C,..."));
+    QCOMPARE(shapeOf("%AMROUNDEDRECTD40", true), QString("%AM<name>"));
+    QCOMPARE(shapeOf("%21,1,0.5,0.2,0,0,0", true), QString("%21,..."));
+    QCOMPARE(shapeOf("%FSLAX46Y46", true), QString("%FSLAX46Y46"));
+    QCOMPARE(shapeOf("%MOMM", true), QString("%MOMM"));
+    QCOMPARE(shapeOf("%IPPOS", true), QString("%IPPOS"));
+    QCOMPARE(shapeOf("%SRX3Y2I5.0J4.0", true), QString("%SRX#Y#I#J#"));
+    // A word that is not syntax - a part or customer number - never shows.
+    QVERIFY(!shapeOf("%LNBOARDXY-1409", true).contains("BOARD"));
+    QVERIFY(!shapeOf("ABCDEF123", true).contains("ABCDEF"));
+    QVERIFY(!shapeOf("G01 lower case text", true).contains("lower"));
+    // Drill
+    QCOMPARE(shapeOf("T01C0.300", false), QString("T#C#"));
+    QCOMPARE(shapeOf("METRIC,TZ", false), QString("METRIC,TZ"));
+    QCOMPARE(shapeOf(";job: C:\\work\\board.job", false), QString(";..."));
+    QCOMPARE(shapeOf("X1.5Y-2.25", false), QString("X#Y#"));
+}
+
+void TestSameDataCheck::diagnosisNamesTheRefusalRule()
+{
+    const QString text = SameDataDiagnosis::explain(gerber(kExportA + "G91*\n"), gerber(kExportB));
+    QVERIFY2(text.contains("refused (A) - G91 incremental coordinates"), qPrintable(text));
+    QVERIFY2(text.contains(": G91"), qPrintable(text));
+    QVERIFY2(!text.contains("refused (B)"), qPrintable(text));
+}
+
+void TestSameDataCheck::diagnosisSeesReorderedRegionArcs()
+{
+    // Two arc regions written in the other order: the objects agree, but the
+    // arc lines are kept as text, which is compared in file order.
+    const QString first = "G36*\nX0Y0D02*\nG03X1000000Y0I500000J0D01*\nG01X1000000Y1000000D01*\nX0Y0D01*\nG37*\n";
+    const QString second = "G36*\nX5000000Y0D02*\nG03X6000000Y0I500000J0D01*\nG01X6000000Y1000000D01*\n"
+                           "X5000000Y0D01*\nG37*\n";
+    const QString text = SameDataDiagnosis::explain(gerber(kExportA, "D10*\nG75*\n" + first + second),
+                                                    gerber(kExportB, "D10*\nG75*\n" + second + first));
+    QVERIFY2(text.contains("same lines, different order"), qPrintable(text));
+    QVERIFY2(text.contains("G03X#Y#I#J#D01 (in region)"), qPrintable(text));
+}
+
+void TestSameDataCheck::diagnosisCountsObjectDifferences()
+{
+    const QString text = SameDataDiagnosis::explain(gerber(kExportA, "D10*\nX1000000Y0D03*\n"),
+                                                    gerber(kExportB, "D10*\nX2000000Y0D03*\n"));
+    QVERIFY2(text.contains("objects differ"), qPrintable(text));
+    QVERIFY2(text.contains("only in A: 1 flash | only in B: 1 flash"), qPrintable(text));
+}
+
+void TestSameDataCheck::diagnosisPassesForSameData()
+{
+    QCOMPARE(SameDataDiagnosis::explain(gerber(kExportA), gerber(kExportB)),
+             QString("Same-data check: all steps pass - same data"));
 }
 
 QTEST_MAIN(TestSameDataCheck)

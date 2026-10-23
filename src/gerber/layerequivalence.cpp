@@ -6,6 +6,8 @@
 #include <QDataStream>
 #include <QHash>
 #include <QIODevice>
+#include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace {
@@ -119,4 +121,88 @@ bool LayerEquivalence::sameObjects(const Layer &a, const Layer &b)
         return false;
     }
     return sortedRuns(a) == sortedRuns(b);
+}
+
+// Diagnostics only (the 1.8.7 test round): the same keys sameObjects
+// compares, built the same way as sortedRuns, but each one remembers what
+// kind of object it came from so the difference can be counted per kind.
+QString LayerEquivalence::describeDifference(const Layer &a, const Layer &b)
+{
+    struct Tally {
+        QHash<QString, int> perKind; // "flash" -> count
+        QHash<QByteArray, int> keys; // run number + object key -> count
+        QHash<QByteArray, QString> kindOfKey;
+        int runs = 0;
+    };
+    const auto kindOf = [](const GraphicObject &object) {
+        switch (object.type) {
+            case ObjectType::Flash:
+                return QStringLiteral("flash");
+            case ObjectType::Stroke:
+                return object.isArc ? QStringLiteral("arc") : QStringLiteral("line");
+            case ObjectType::Region:
+                return QStringLiteral("region");
+        }
+        return QStringLiteral("?");
+    };
+    const auto tally = [&kindOf](const Layer &layer) {
+        QHash<int, QByteArray> apertureKeys;
+        for (auto it = layer.apertures.constBegin(); it != layer.apertures.constEnd(); ++it) {
+            apertureKeys.insert(it.key(), apertureKey(it.key(), layer));
+        }
+        Tally result;
+        bool first = true;
+        Polarity runPolarity = Polarity::Dark;
+        for (const GraphicObject &object : layer.objects) {
+            if (first || object.polarity != runPolarity) {
+                ++result.runs;
+                runPolarity = object.polarity;
+                first = false;
+            }
+            if (!apertureKeys.contains(object.apertureCode) && object.type != ObjectType::Region) {
+                apertureKeys.insert(object.apertureCode, apertureKey(object.apertureCode, layer));
+            }
+            QByteArray key = QByteArray::number(result.runs) + ':' + objectKey(object, apertureKeys);
+            const QString kind = kindOf(object);
+            ++result.perKind[kind];
+            ++result.keys[key];
+            result.kindOfKey.insert(key, kind);
+        }
+        return result;
+    };
+    const Tally tallyA = tally(a);
+    const Tally tallyB = tally(b);
+
+    static const QStringList kinds = {QStringLiteral("flash"), QStringLiteral("line"), QStringLiteral("arc"),
+                                      QStringLiteral("region")};
+    const auto counts = [](const QHash<QString, int> &perKind) {
+        QStringList parts;
+        for (const QString &kind : kinds) {
+            parts << QStringLiteral("%1 %2").arg(perKind.value(kind)).arg(kind);
+        }
+        return parts.join(QStringLiteral(", "));
+    };
+    // Objects of `mine` with no equal partner in `theirs`, counted per kind.
+    const auto unmatched = [](const Tally &mine, const Tally &theirs) {
+        QHash<QString, int> perKind;
+        for (auto it = mine.keys.constBegin(); it != mine.keys.constEnd(); ++it) {
+            const int extra = it.value() - theirs.keys.value(it.key());
+            if (extra > 0) {
+                perKind[mine.kindOfKey.value(it.key())] += extra;
+            }
+        }
+        QStringList parts;
+        for (const QString &kind : kinds) {
+            if (perKind.value(kind) > 0) {
+                parts << QStringLiteral("%1 %2").arg(perKind.value(kind)).arg(kind);
+            }
+        }
+        return parts.isEmpty() ? QStringLiteral("none") : parts.join(QStringLiteral(", "));
+    };
+
+    QStringList lines;
+    lines << QStringLiteral("  A: %1 (%2 polarity runs)").arg(counts(tallyA.perKind)).arg(tallyA.runs);
+    lines << QStringLiteral("  B: %1 (%2 polarity runs)").arg(counts(tallyB.perKind)).arg(tallyB.runs);
+    lines << QStringLiteral("  only in A: %1 | only in B: %2").arg(unmatched(tallyA, tallyB), unmatched(tallyB, tallyA));
+    return lines.join(QLatin1Char('\n'));
 }

@@ -167,6 +167,7 @@ add_test(NAME test_excellonparser COMMAND test_excellonparser)
 add_executable(test_samedatacheck
     test_samedatacheck.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatacheck.cpp
+    ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatadiagnosis.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/layerequivalence.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp

@@ -345,8 +345,20 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     return layer;
 }
 
-std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content)
+std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal)
 {
+    // Every "no answer" goes through here, so the diagnostic can say which
+    // rule it was and on which line.
+    int lineNumber = 0;
+    const auto refuse = [&](const char *rule, const QString &lineText) -> std::optional<QStringList> {
+        if (refusal) {
+            refusal->rule = QString::fromLatin1(rule);
+            refusal->statement = lineText;
+            refusal->position = lineNumber;
+        }
+        return std::nullopt;
+    };
+
     QStringList kept;
     // The header ends at '%' or M95, exactly where the parser stops reading
     // unit lines (its headerDone flag).
@@ -361,6 +373,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         return line.compare(QLatin1String(command), Qt::CaseInsensitive) == 0;
     };
     for (const QString &rawLine : content.split(QLatin1Char('\n'))) {
+        ++lineNumber;
         const QString line = rawLine.trimmed();
         if (line.isEmpty()) {
             continue;
@@ -385,7 +398,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
             // it sits among the hole lines is not compared. Refuse.
             if (!tool.diameterText.isEmpty()) {
                 if (definedTools.contains(tool.number)) {
-                    return std::nullopt;
+                    return refuse("tool defined twice", line);
                 }
                 definedTools.insert(tool.number);
             }
@@ -401,7 +414,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         // a file using R is never "same data".
         static const QRegularExpression repeatLine(QStringLiteral("^R\\d"));
         if (repeatLine.match(line).hasMatch()) {
-            return std::nullopt;
+            return refuse("R repeat command", line);
         }
         // A line is left out as geometry only when the WHOLE line is in a
         // form the parser really reads. Anything else falls through to the
@@ -476,7 +489,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         if (line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive)
             || line.startsWith(QLatin1String("METRIC"), Qt::CaseInsensitive)) {
             if (headerDone) {
-                return std::nullopt;
+                return refuse("unit line after the header", line);
             }
             unitIsInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);
             kept << line;
@@ -492,7 +505,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         const bool isM72 = lineIs(line, "M72");
         if (isM71 || isM72) {
             if (isM72 != unitIsInch) {
-                return std::nullopt;
+                return refuse("M71/M72 names a different unit than the parser uses", line);
             }
             kept << line;
             continue;
@@ -504,7 +517,7 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
             kept << line;
             continue;
         }
-        return std::nullopt;
+        return refuse("line the parser does not read", line);
     }
     return kept;
 }

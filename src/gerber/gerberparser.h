@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include "gerberobjectmodel.h"
+#include "samedatarefusal.h"
 
 // Parses one Gerber (RS-274X) file's full geometry into a single
 // composited path, in millimeters, ready to hand to GerberDiffRenderer.
@@ -62,7 +63,10 @@ QPainterPath parseContent(const QString &content);
 // where they sit relative to the objects is not compared, so equal text in
 // both files proves nothing. A file with std::nullopt is never the same
 // data. Used by SameDataCheck.
-std::optional<QStringList> nonGeometryStatements(const QString &content);
+//
+// `refusal` (optional, diagnostics only) is filled with the rule and the
+// statement that made the result std::nullopt.
+std::optional<QStringList> nonGeometryStatements(const QString &content, SameDataRefusal *refusal = nullptr);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an

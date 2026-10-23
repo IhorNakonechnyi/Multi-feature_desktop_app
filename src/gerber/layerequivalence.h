@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QString>
+
 #include "gerberobjectmodel.h"
 
 // Decides whether two parsed layers draw exactly the same objects, so a
@@ -26,5 +28,11 @@ namespace LayerEquivalence {
 // Everything the object model does not hold - format directives, attributes,
 // comments - is NOT looked at here; SameDataCheck compares that separately.
 bool sameObjects(const Layer &a, const Layer &b);
+
+// Diagnostics only (1.8.7 test round): for two layers sameObjects calls
+// different, a few lines of counts - objects per kind on each side, polarity
+// runs, and per kind how many objects have no equal partner on the other
+// side. Numbers only, never a coordinate or size.
+QString describeDifference(const Layer &a, const Layer &b);
 
 } // namespace LayerEquivalence

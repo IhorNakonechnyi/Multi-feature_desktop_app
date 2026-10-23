@@ -881,6 +881,9 @@ struct GeometryWalk {
     bool regionStarted = false;         // the region's first operation (a D02) was met
     bool regionMovedAfterStart = false; // a further D02 came after that
     int regionVertexCount = 0;          // vertices the parser will record
+    // Set just before classifyPlain returns Refuse: which rule it was, for
+    // the diagnostic line (SameDataRefusal). The verdict never depends on it.
+    const char *refuseRule = nullptr;
 };
 
 enum class PlainVerdict {
@@ -941,6 +944,7 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         // A second G36 inside an open region makes the parser throw the
         // open region's vertices away - that outline would be lost.
         if (walk.insideRegion && walk.regionStarted) {
+            walk.refuseRule = "G36 inside an open region";
             return PlainVerdict::Refuse;
         }
         walk.insideRegion = true;
@@ -954,6 +958,7 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         // it emits nothing, and the statements we left out (the start move)
         // would vanish. A full-circle arc region is the realistic case.
         if (walk.insideRegion && walk.regionStarted && walk.regionVertexCount < 3) {
+            walk.refuseRule = "region with fewer than 3 vertices";
             return PlainVerdict::Refuse;
         }
         walk.insideRegion = false;
@@ -1002,6 +1007,7 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
             // Inside a region it could be a hidden move that starts a
             // second outline, which the outline rule must see.
             if (walk.insideRegion) {
+                walk.refuseRule = "unreadable coordinate statement inside a region";
                 return PlainVerdict::Refuse;
             }
         }
@@ -1035,10 +1041,12 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
     // the parser ignores it.
     if (walk.insideRegion) {
         if (operation == 3) {
+            walk.refuseRule = "flash (D03) inside a region";
             return PlainVerdict::Refuse;
         }
         if (!walk.regionStarted) {
             if (operation != 2 || isBare) {
+                walk.refuseRule = "region does not start with a D02 move";
                 return PlainVerdict::Refuse;
             }
             walk.regionStarted = true;
@@ -1047,6 +1055,7 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
             walk.regionMovedAfterStart = true;
         } else { // D01
             if (walk.regionMovedAfterStart) {
+                walk.refuseRule = "second outline in one region (a D01 after a later D02)";
                 return PlainVerdict::Refuse;
             }
             if (!isBare) { // a bare D01 does not reach the region code
@@ -1085,15 +1094,27 @@ QPainterPath GerberParser::parseContent(const QString &content)
     return flattenAndCompositeForLegacyRender(layer);
 }
 
-std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content)
+std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content, SameDataRefusal *refusal)
 {
+    // Every "no answer" goes through here, so the diagnostic can say which
+    // rule it was and where. `position` is the statement being looked at.
+    int position = 0;
+    const auto refuse = [&](const char *rule, const QString &statementText) -> std::optional<QStringList> {
+        if (refusal) {
+            refusal->rule = QString::fromLatin1(rule);
+            refusal->statement = statementText;
+            refusal->position = position;
+        }
+        return std::nullopt;
+    };
+
     // A file whose last statement is cut off (an unterminated '%...' block,
     // or a final command with no '*') loses that tail in the parser without
     // a trace, so the tail is compared nowhere - refuse.
     bool truncated = false;
     const QVector<GerberStatement> statements = tokenize(content, &truncated);
     if (truncated) {
-        return std::nullopt;
+        return refuse("file cut off mid-statement", QString());
     }
 
     QStringList kept;
@@ -1124,6 +1145,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
     };
 
     for (const GerberStatement &statement : statements) {
+        ++position;
         const QString &text = statement.text;
         // A macro body runs from the %AM header to the first statement of
         // any kind that does not look like a body line (same test the parser
@@ -1157,7 +1179,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 }
                 const int code = text.mid(3, codeEnd - 3).toInt();
                 if (apertureCodes.contains(code)) {
-                    return std::nullopt;
+                    return refuse("aperture D-code defined twice", QLatin1Char('%') + text);
                 }
                 apertureCodes.insert(code);
                 apertureOrGeometrySeen = true;
@@ -1206,7 +1228,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 // declared with - refuse.
                 const QString name = text.mid(2);
                 if (macroNames.contains(name)) {
-                    return std::nullopt;
+                    return refuse("macro name defined twice", QLatin1Char('%') + text);
                 }
                 macroNames.insert(name);
                 inMacro = true;
@@ -1225,7 +1247,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 // so incremental (I) would be decoded as absolute - the
                 // same hazard as G91, so refuse anything but A.
                 if (text.length() < 4 || text.at(3) != QLatin1Char('A')) {
-                    return std::nullopt;
+                    return refuse("%FS not in absolute notation", QLatin1Char('%') + text);
                 }
                 kept << QLatin1Char('%') + text;
                 continue;
@@ -1235,7 +1257,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             // through to the refuse group.
             if (text == QLatin1String("MOIN") || text == QLatin1String("MOMM")) {
                 if (!acceptUnit(text == QLatin1String("MOIN"))) {
-                    return std::nullopt;
+                    return refuse("unit switched after apertures or geometry", QLatin1Char('%') + text);
                 }
                 kept << QLatin1Char('%') + text;
                 continue;
@@ -1256,7 +1278,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                     QStringLiteral("^SRX[1-9]\\d{0,8}Y[1-9]\\d{0,8}I%1J%1$")
                         .arg(QStringLiteral("[+-]?(?:\\d+\\.?\\d*|\\.\\d+)")));
                 if (text != QLatin1String("SR") && !stepRepeatForm.match(text).hasMatch()) {
-                    return std::nullopt;
+                    return refuse("%SR in a form the parser misreads", QLatin1Char('%') + text);
                 }
                 kept << QLatin1Char('%') + text;
                 continue;
@@ -1271,7 +1293,7 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             // The parser ignores or does not know them, and where they sit
             // relative to the objects is not compared, so equal text in both
             // files proves nothing. No answer is safer than a wrong "same".
-            return std::nullopt;
+            return refuse("% directive the parser does not read", QLatin1Char('%') + text);
         }
         // Same comment test as the parse loop above: only a literal "G04".
         // A G04 comment never affects the image (Gerber spec), so ALL of them
@@ -1290,14 +1312,14 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         // not startsWith: it can be chained ("G90G91*"). G04 comments are
         // already skipped above, so this can only over-refuse.
         if (plain.contains(QLatin1String("G91"))) {
-            return std::nullopt;
+            return refuse("G91 incremental coordinates", plain);
         }
         // G70 (inches) / G71 (mm): the old spelling of %MO, read by the
         // parser with the same startsWith test. Same unit rule as %MO; the
         // statement itself is still kept as text below.
         if (plain.startsWith(QLatin1String("G70")) || plain.startsWith(QLatin1String("G71"))) {
             if (!acceptUnit(plain.startsWith(QLatin1String("G70")))) {
-                return std::nullopt;
+                return refuse("unit switched after apertures or geometry", plain);
             }
         }
         // Geometry (a draw, move, flash or aperture select) is left out only
@@ -1311,13 +1333,13 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             kept << plain;
             break;
         case PlainVerdict::Refuse:
-            return std::nullopt;
+            return refuse(walk.refuseRule, plain);
         }
     }
     // A region never closed by G37 is never emitted by the parser, so its
     // outline would be lost.
     if (walk.insideRegion && walk.regionStarted) {
-        return std::nullopt;
+        return refuse("region never closed by G37", QString());
     }
     return kept;
 }

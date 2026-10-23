@@ -100,6 +100,9 @@ add_executable(PcbSupplierWorkflow WIN32
     src/archivecompare/gerberdifftrigger.cpp
     src/archivecompare/samedatacheck.h
     src/archivecompare/samedatacheck.cpp
+    src/archivecompare/samedatadiagnosis.h
+    src/archivecompare/samedatadiagnosis.cpp
+    src/gerber/samedatarefusal.h
     src/gerber/exportnoise.h
     src/gerber/layerequivalence.h
     src/gerber/layerequivalence.cpp

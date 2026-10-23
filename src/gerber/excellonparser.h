@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include "gerberobjectmodel.h"
+#include "samedatarefusal.h"
 
 // Parses an Excellon (.drl/.xln) drill file into the same integer-nm object
 // model GerberParser produces (see gerberobjectmodel.h), so drill layers
@@ -55,6 +56,9 @@ Layer parseContentToObjects(const QString &content);
 // for": any line not on the allow-list (G91, pattern or mirror
 // commands, ...), an M71/M72 that disagrees with the parser's unit, a unit line after the header, an R repeat command, or a
 // tool defined twice. Such a file is never the same data.
-std::optional<QStringList> nonGeometryLines(const QString &content);
+//
+// `refusal` (optional, diagnostics only) is filled with the rule and the
+// line that made the result std::nullopt.
+std::optional<QStringList> nonGeometryLines(const QString &content, SameDataRefusal *refusal = nullptr);
 
 } // namespace ExcellonParser
