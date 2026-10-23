@@ -1219,6 +1219,12 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             if (text == QLatin1String("IPPOS")) {
                 continue;
             }
+            // %ICAS (input code ASCII, an old header) states what every file
+            // the parser can read already is. Exact match: any other input
+            // code falls through to the refuse group.
+            if (text == QLatin1String("ICAS")) {
+                continue;
+            }
 
             // Macro definitions (the %AM header and its body lines) are
             // skipped too. Altium names a macro after its D-code, so a

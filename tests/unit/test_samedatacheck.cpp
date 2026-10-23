@@ -86,6 +86,8 @@ private slots:
     void reexportWithNewX2DateAndSoftwareIsSameData();
     void reexportWithNewSameCoordinatesGuidIsSameData();
     void oldFileHeaderDirectivesAreSameData();
+    void asciiInputCodeIsSameData();
+    void otherInputCodeIsNeverSameData();
     void windowsLineEndingsAreSameData();
     void renumberedApertureWithSameShapeIsSameData();
     void reorderedDarkObjectsAreSameData();
@@ -490,6 +492,19 @@ void TestSameDataCheck::oldFileHeaderDirectivesAreSameData()
     // names that differ per export.
     QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%IPPOS*%\n%LNfirst.gbr*%\n%INjob1*%\n"),
                                       gerber(kExportB + "%LNsecond.gbr*%\n%INjob2*%\n")));
+}
+
+void TestSameDataCheck::asciiInputCodeIsSameData()
+{
+    // %ICAS (an old header: "this file is ASCII") says what every file
+    // already is, so stating it and leaving it out mean the same image.
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%ICAS*%\n"), gerber(kExportB + "%ICAS*%\n")));
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%ICAS*%\n"), gerber(kExportB)));
+}
+
+void TestSameDataCheck::otherInputCodeIsNeverSameData()
+{
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%ICEBC*%\n"), gerber(kExportB + "%ICEBC*%\n")));
 }
 
 void TestSameDataCheck::strayMacroPrimitiveIsNeverSameData()

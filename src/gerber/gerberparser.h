@@ -41,8 +41,9 @@ QPainterPath parseContent(const QString &content);
 // left out only in a form the parser fully reads into objects (fields in
 // G/X/Y/I/J order, I/J only on an arc draw outside a region, bare coordinates
 // only after a known operation); any other form is kept as text. Comments are left out because they
-// never affect the image. %LN and %IN (layer/image names) and %IPPOS (the
-// default polarity) are left out too: they differ per export and draw nothing.
+// never affect the image. %LN and %IN (layer/image names), %IPPOS (the
+// default polarity) and %ICAS (input code ASCII) are left out too: they
+// differ per export or restate a default, and draw nothing.
 //
 // Macro definitions (%AM and its body) are left out too: Altium names macros
 // after their D-code, and each used macro is compared by its recipe through
