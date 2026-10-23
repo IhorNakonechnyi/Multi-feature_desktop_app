@@ -48,7 +48,7 @@ Per constitution Principle 4 (core logic gets tests, UI/glue doesn't) - this pha
 - Arc interpolation: both single- and multi-quadrant modes, at least one known-correct arc (e.g. a quarter circle) verified against expected endpoint/sweep.
 - Macro expression evaluator: variable substitution, chained assignment, all four operators, operator precedence.
 - Macro compositing: at least one case combining an additive and a subtractive primitive, confirming the subtraction actually removes area rather than just layering visually.
-- Region fill: a simple closed polygon from a `G36`/`G37` point sequence.
+- Region fill: a closed outline from a `G36`/`G37` point sequence. *(Updated in v1.8.8: edges drawn in G02/G03 mode are kept as true arcs, G74 included, and a single full-circle arc is a valid region. Before that, a region arc was reduced to a straight chord.)*
 - Unsupported-primitive fallback: confirms a deprecated/unimplemented macro primitive code degrades to the fixed-size fallback circle rather than crashing or being silently skipped entirely.
 
 **Test fixtures must be hand-authored minimal synthetic Gerber snippets**, not copies of the real sample archive used to scope this design - that archive is a customer's confidential board data living outside the repo (`Test_data/`, not committed), and per `CLAUDE.md`'s confidentiality constraint nothing derived from real customer files should end up in the committed test suite, even though the Gerber *format* itself isn't confidential.
