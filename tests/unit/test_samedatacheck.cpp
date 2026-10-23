@@ -119,6 +119,8 @@ private slots:
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
     void positiveFilePolarityEqualsMissing();
+    void solderMaskNegativePolarityEqualsMissing();
+    void negativePolarityOnOtherLayersIsDifferent();
     void drillLayerColorIsNoise();
 
     // Gerber: geometry only in forms the parser fully reads
@@ -463,6 +465,35 @@ void TestSameDataCheck::positiveFilePolarityEqualsMissing()
     // Newer Altium writes it, older does not (real data, pair test3).
     QVERIFY(SameDataCheck::isSameData(gerber(kExportA + "%TF.FilePolarity,Positive*%\n"), gerber(kExportB)));
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%TF.FilePolarity,Negative*%\n"), gerber(kExportB)));
+}
+
+void TestSameDataCheck::solderMaskNegativePolarityEqualsMissing()
+{
+    // A solder mask file draws the openings by convention; Altium 22 states
+    // that with Negative, Altium 20 leaves it out (real data, pair test3).
+    // The label may come before or after the file function.
+    const QString mask = "%TF.FileFunction,Soldermask,Top*%\n";
+    const QString negative = "%TF.FilePolarity,Negative*%\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + mask), gerber(kExportB + mask + negative)));
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + mask), gerber(kExportB + negative + mask)));
+    // The accepted cost of skipping it: on a solder mask, Positive and
+    // Negative over the same drawing also read as same (one file mislabelled).
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + mask + "%TF.FilePolarity,Positive*%\n"),
+                                      gerber(kExportB + mask + negative)));
+}
+
+void TestSameDataCheck::negativePolarityOnOtherLayersIsDifferent()
+{
+    // On a copper plane Negative turns the drawn shapes into holes in solid
+    // copper - a different board, though the drawing is the same.
+    const QString plane = "%TF.FileFunction,Copper,L2,Inr,Plane*%\n";
+    const QString negative = "%TF.FilePolarity,Negative*%\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + plane), gerber(kExportB + plane + negative)));
+    // Without a file function, nothing says the layer is a solder mask.
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA), gerber(kExportB + negative)));
+    // A file function that only starts with the word is not a solder mask.
+    const QString notMask = "%TF.FileFunction,SoldermaskX*%\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + notMask), gerber(kExportB + notMask + negative)));
 }
 
 void TestSameDataCheck::drillLayerColorIsNoise()

@@ -1,5 +1,6 @@
 #include "gerberparser.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -1169,6 +1170,12 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
     bool inMacro = false; // true while the statements after a %AM header are its body
     GeometryWalk walk;    // parser state the plain-statement forms depend on
 
+    // Whether this file says it is a solder mask (its own %TF.FileFunction),
+    // read up front because the polarity label may come before it.
+    const bool isSolderMask = std::any_of(statements.begin(), statements.end(), [](const GerberStatement &s) {
+        return s.isParameterStatement && ExportNoise::isSolderMaskFileFunction(s.text);
+    });
+
     // Unit switches (see the unit rule below). The parser applies the
     // file's LAST unit to every macro aperture, whenever it was defined.
     bool apertureOrGeometrySeen = false;
@@ -1237,8 +1244,13 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             }
             // %TF.FilePolarity,Positive is the Gerber default, so stating it
             // and leaving it out mean the same image. Only that exact value
-            // is skipped; ",Negative" falls through and is compared.
+            // is skipped here; ",Negative" is judged just below.
             if (ExportNoise::isDefaultFilePolarity(text)) {
+                continue;
+            }
+            // ",Negative" is skipped only in a solder mask, where it restates
+            // the convention (see ExportNoise::isNegativeFilePolarity).
+            if (isSolderMask && ExportNoise::isNegativeFilePolarity(text)) {
                 continue;
             }
             // %TO (net/component/pin labels on the objects that follow) and

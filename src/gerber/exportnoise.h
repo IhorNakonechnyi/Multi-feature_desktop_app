@@ -105,7 +105,8 @@ inline bool isVolatileAttribute(const QString &statement)
 // case-insensitively). Positive is the Gerber default, so a file that states it
 // and a file that leaves it out describe the same image: newer Altium writes
 // it, older Altium does not. Anything else - ",Negative", extra fields - is
-// not the default and stays compared. This is not "noise" in the sense of
+// not the default and stays compared (",Negative" has one exception, see
+// isNegativeFilePolarity). This is not "noise" in the sense of
 // isVolatileAttribute (FilePolarity is deliberately not on that list): only
 // this one value is skipped, and only because it equals "absent".
 inline bool isDefaultFilePolarity(const QString &statement)
@@ -115,6 +116,31 @@ inline bool isDefaultFilePolarity(const QString &statement)
         return false;
     }
     return statement.mid(prefix.size()).trimmed().compare(QLatin1String("Positive"), Qt::CaseInsensitive) == 0;
+}
+
+// True only for the exact attribute "TF.FilePolarity,Negative". Skipped only
+// in a solder mask file (see isSolderMaskFileFunction): a solder mask draws
+// its openings by convention, so the label restates that - newer Altium
+// writes it, older Altium does not. On any other layer, Negative turns the
+// drawn shapes into holes (a copper plane), so there it stays compared.
+inline bool isNegativeFilePolarity(const QString &statement)
+{
+    static const QLatin1String prefix("TF.FilePolarity,");
+    if (!statement.startsWith(prefix, Qt::CaseInsensitive)) {
+        return false;
+    }
+    return statement.mid(prefix.size()).trimmed().compare(QLatin1String("Negative"), Qt::CaseInsensitive) == 0;
+}
+
+// True when the statement is "TF.FileFunction,Soldermask" with or without
+// further fields (",Top", ",Bot"), and not a longer word.
+inline bool isSolderMaskFileFunction(const QString &statement)
+{
+    static const QLatin1String prefix("TF.FileFunction,Soldermask");
+    if (!statement.startsWith(prefix, Qt::CaseInsensitive)) {
+        return false;
+    }
+    return statement.length() == prefix.size() || statement.at(prefix.size()) == QLatin1Char(',');
 }
 
 // `commentBody` is a comment's text with its marker already removed - what
