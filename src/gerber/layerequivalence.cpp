@@ -74,8 +74,15 @@ QByteArray objectKey(const GraphicObject &object, const QHash<int, QByteArray> &
         case ObjectType::Region:
             // Vertex order is kept: it is the outline itself.
             out << static_cast<qint64>(object.regionPoints.size());
-            for (const PointNm &vertex : object.regionPoints) {
-                out << vertex;
+            for (int i = 0; i < object.regionPoints.size(); ++i) {
+                out << object.regionPoints.at(i);
+                // The edge that reaches this vertex: straight, or an arc with
+                // its center and direction (a straight edge has no center).
+                const RegionEdge edge = object.regionEdges.value(i);
+                out << edge.isArc;
+                if (edge.isArc) {
+                    out << edge.arcCenter << edge.arcCounterClockwise;
+                }
             }
             break;
     }

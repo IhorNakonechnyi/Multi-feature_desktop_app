@@ -5,6 +5,8 @@
 #include "archivecompare/samedatacheck.h"
 #include "archivecompare/samedatadiagnosis.h"
 #include "gerber/exportnoise.h"
+#include "gerber/gerberparser.h"
+#include "gerber/layerequivalence.h"
 
 // Covers the re-export check end to end. Most cases are of one shape: take a
 // file, change one thing, and assert the verdict. The changes that must still
@@ -128,6 +130,7 @@ private slots:
     void altiumTrailingRegionMoveIsSameData();
     void unchangedRegionArcIsSameData();
     void changedRegionArcBulgeIsDifferent();
+    void regionArcEdgesTakePartInObjectComparison();
     void bareCoordinateBeforeAnyOperationIsText();
     void coordinateWithApertureCodeIsText();
     void oldStyleCodesAreSameData();
@@ -638,6 +641,24 @@ void TestSameDataCheck::changedRegionArcBulgeIsDifferent()
     QString b = a;
     b.replace("I0J500000", "I-500000J500000");
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, a), gerber(kExportB, b)));
+}
+
+void TestSameDataCheck::regionArcEdgesTakePartInObjectComparison()
+{
+    // The objects alone (not the kept text) must tell a straight edge from
+    // a curved one, and one bulge from another, over the same vertices.
+    const QString straight = "G75*\nG36*\nX0Y0D02*\nG01X1000000Y0D01*\n"
+                             "X1000000Y1000000D01*\nX0Y0D01*\nG37*\n";
+    QString curved = straight;
+    curved.replace("X1000000Y1000000D01", "G03X1000000Y1000000I0J500000D01*\nG01");
+    QString otherBulge = curved;
+    otherBulge.replace("I0J500000", "I-500000J500000");
+    const auto layer = [](const QString &body) {
+        return GerberParser::parseContentToObjects(QString::fromUtf8(gerber(QString(), body)));
+    };
+    QVERIFY(LayerEquivalence::sameObjects(layer(curved), layer(curved)));
+    QVERIFY(!LayerEquivalence::sameObjects(layer(straight), layer(curved)));
+    QVERIFY(!LayerEquivalence::sameObjects(layer(curved), layer(otherBulge)));
 }
 
 void TestSameDataCheck::bareCoordinateBeforeAnyOperationIsText()

@@ -156,6 +156,7 @@ struct ParserState {
     // the time G37 closes it, same as before.
     bool insideRegion = false;
     QPolygonF regionPoints;
+    QVector<RegionEdge> regionEdges; // one per regionPoints entry - see GraphicObject::regionEdges
 
     // %SR (step-and-repeat) state: while active, every subsequent
     // draw/flash/region is repeated across a repeatCountX x repeatCountY
@@ -363,6 +364,13 @@ void emitObject(ParserState &state, const GraphicObject &base)
                 vertex.x += offX;
                 vertex.y += offY;
             }
+            // Only arc edges have a center; a straight edge's stays (0,0).
+            for (RegionEdge &edge : object.regionEdges) {
+                if (edge.isArc) {
+                    edge.arcCenter.x += offX;
+                    edge.arcCenter.y += offY;
+                }
+            }
             state.objects.append(object);
         }
     }
@@ -490,6 +498,33 @@ void emitLinearStroke(ParserState &state, const QPointF &from, const QPointF &to
     object.strokeTo = toNm(to);
     object.isArc = false;
     emitObject(state, object);
+}
+
+// The absolute center of the arc a G02/G03 draw makes from `from` to the
+// pen's new position. The file gives the center as I/J offsets from the
+// arc's *start* point, not from the origin or the endpoint - see the Gerber
+// spec. Each field is bounded the same way applyCoordinateToken bounds X/Y,
+// so I's digits stop at J rather than running to the end of the string.
+// Used for arc strokes and for arc edges of a region alike.
+QPointF arcCenter(const ParserState &state, const QString &coordinatePart, const QPointF &from,
+                  bool counterClockwise)
+{
+    const int iIndex = coordinatePart.indexOf(QLatin1Char('I'));
+    const int jIndex = coordinatePart.indexOf(QLatin1Char('J'));
+    QPointF centerOffset(0.0, 0.0);
+    if (iIndex >= 0) {
+        const int end = nextUppercaseIndex(coordinatePart, iIndex + 1);
+        centerOffset.setX(state.format.decodeCoordinateMm(coordinatePart.mid(iIndex + 1, end - iIndex - 1)));
+    }
+    if (jIndex >= 0) {
+        const int end = nextUppercaseIndex(coordinatePart, jIndex + 1);
+        centerOffset.setY(state.format.decodeCoordinateMm(coordinatePart.mid(jIndex + 1, end - jIndex - 1)));
+    }
+    if (state.singleQuadrantArcs) {
+        centerOffset =
+            resolveSingleQuadrantCenterOffset(from, state.currentPoint, centerOffset, counterClockwise);
+    }
+    return from + centerOffset;
 }
 
 void emitArcStroke(ParserState &state, const QPointF &from, const QPointF &to, const QPointF &center,
@@ -632,16 +667,21 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             // insideRegion branch at the bottom of this loop).
             state.insideRegion = true;
             state.regionPoints.clear();
+            state.regionEdges.clear();
             continue;
         }
         if (text.startsWith(QLatin1String("G37"))) {
             // Closes the region: emit it as a Region GraphicObject carrying
-            // the collected contour vertices (the flatten stage closes and
-            // fills the polygon later, the same way a flash or stroke is
-            // resolved later). Fewer than 3 points means the region never got
-            // any real coordinate data (malformed input) - nothing to emit.
+            // the collected contour vertices and edges (the flatten stage
+            // closes and fills the outline later, the same way a flash or
+            // stroke is resolved later). It needs 3 points to enclose an
+            // area - or fewer with an arc edge (a round region is one start
+            // point and one full-circle arc). Anything less never got real
+            // coordinate data (malformed input) - nothing to emit.
             state.insideRegion = false;
-            if (state.regionPoints.size() >= 3) {
+            const bool hasArc = std::any_of(state.regionEdges.begin(), state.regionEdges.end(),
+                                            [](const RegionEdge &edge) { return edge.isArc; });
+            if (state.regionPoints.size() >= 3 || (state.regionPoints.size() >= 2 && hasArc)) {
                 GraphicObject object;
                 object.type = ObjectType::Region;
                 object.polarity = state.currentPolarity;
@@ -649,6 +689,7 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
                 for (const QPointF &vertex : state.regionPoints) {
                     object.regionPoints.append(toNm(vertex));
                 }
+                object.regionEdges = state.regionEdges;
                 emitObject(state, object);
             }
             continue;
@@ -790,34 +831,32 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             // regression this guards against.
             if (state.regionPoints.isEmpty()) {
                 state.regionPoints << state.currentPoint;
+                state.regionEdges << RegionEdge{}; // the start has no edge
             }
             if (opCode == 1) {
+                // In G02/G03 mode the edge to this vertex is an arc, read
+                // exactly as an arc draw outside a region is.
+                RegionEdge edge;
+                if (state.interpolationMode != ParserState::InterpolationMode::Linear) {
+                    edge.arcCounterClockwise =
+                        state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
+                    edge.arcCenter =
+                        toNm(arcCenter(state, coordinatePart, previousPoint, edge.arcCounterClockwise));
+                    // G74 arcs span at most 90 degrees, so equal end points
+                    // draw nothing; only a G75 arc closes into a full circle.
+                    edge.isArc = !(state.singleQuadrantArcs && previousPoint == state.currentPoint);
+                    if (!edge.isArc) {
+                        edge.arcCenter = PointNm{};
+                    }
+                }
                 state.regionPoints << state.currentPoint;
+                state.regionEdges << edge;
             }
         } else if (opCode == 1 && state.interpolationMode != ParserState::InterpolationMode::Linear) {
-            // An arc draw's center is given as I/J offsets from the arc's
-            // *start* point (previousPoint), not from the origin or the
-            // endpoint - see the Gerber spec. Each field is bounded the same
-            // way applyCoordinateToken bounds X/Y, so I's digits stop at J
-            // rather than running to the end of the string.
-            const int iIndex = coordinatePart.indexOf(QLatin1Char('I'));
-            const int jIndex = coordinatePart.indexOf(QLatin1Char('J'));
-            QPointF centerOffset(0.0, 0.0);
-            if (iIndex >= 0) {
-                const int end = nextUppercaseIndex(coordinatePart, iIndex + 1);
-                centerOffset.setX(state.format.decodeCoordinateMm(coordinatePart.mid(iIndex + 1, end - iIndex - 1)));
-            }
-            if (jIndex >= 0) {
-                const int end = nextUppercaseIndex(coordinatePart, jIndex + 1);
-                centerOffset.setY(state.format.decodeCoordinateMm(coordinatePart.mid(jIndex + 1, end - jIndex - 1)));
-            }
+            // An arc draw: center from its I/J offsets (see arcCenter).
             const bool counterClockwise =
                 state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
-            if (state.singleQuadrantArcs) {
-                centerOffset = resolveSingleQuadrantCenterOffset(previousPoint, state.currentPoint,
-                                                                centerOffset, counterClockwise);
-            }
-            const QPointF center = previousPoint + centerOffset;
+            const QPointF center = arcCenter(state, coordinatePart, previousPoint, counterClockwise);
             emitArcStroke(state, previousPoint, state.currentPoint, center, counterClockwise);
         } else if (opCode == 1) {
             emitLinearStroke(state, previousPoint, state.currentPoint);
@@ -961,9 +1000,10 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         return PlainVerdict::KeepAsText;
     }
     if (plain.startsWith(QLatin1String("G37"))) {
-        // The parser emits a region only with 3 or more vertices; with fewer
-        // it emits nothing, and the statements we left out (the start move)
-        // would vanish. A full-circle arc region is the realistic case.
+        // With fewer than 3 vertices the parser emits nothing - unless an arc
+        // edge encloses an area (a full-circle region, the realistic case).
+        // This rule refuses both: for the arc case that costs at most a false
+        // yellow, and it is relaxed only as a separate decision.
         if (walk.insideRegion && walk.regionStarted && walk.regionVertexCount < 3) {
             walk.refuseRule = "region with fewer than 3 vertices";
             return PlainVerdict::Refuse;
@@ -1079,8 +1119,9 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
     if (hasX && !hasY && hasOffset) {
         return PlainVerdict::KeepAsText;
     }
-    // - I/J are read only for an arc draw (D01 in G02/G03 mode) outside a
-    //   region; inside a region only end points are recorded.
+    // - I/J are read only for an arc draw (D01 in G02/G03 mode). Inside a
+    //   region the parser now records them too (as arc edges), but they stay
+    //   text there: leaving them out is a separate decision.
     if (hasOffset && (operation != 1 || !walk.arcInterpolation || walk.insideRegion)) {
         return PlainVerdict::KeepAsText;
     }
