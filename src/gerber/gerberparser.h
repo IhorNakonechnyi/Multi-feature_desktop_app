@@ -42,8 +42,9 @@ QPainterPath parseContent(const QString &content);
 // G/X/Y/I/J order, I/J only on an arc draw outside a region, bare coordinates
 // only after a known operation); any other form is kept as text. Comments are left out because they
 // never affect the image. %LN and %IN (layer/image names), %IPPOS (the
-// default polarity) and %ICAS (input code ASCII) are left out too: they
-// differ per export or restate a default, and draw nothing.
+// default polarity), %ICAS (input code ASCII) and the old %OF/%SF/%AS/%MI/%IR
+// headers when their values do nothing are left out too: they differ per
+// export or restate a default, and draw nothing.
 //
 // Macro definitions (%AM and its body) are left out too: Altium names macros
 // after their D-code, and each used macro is compared by its recipe through
@@ -53,8 +54,8 @@ QPainterPath parseContent(const QString &content);
 // and plain statements such as G01/G36/G75/G90/M02 (a one-digit G-code is
 // written with its leading zero, so G1 and G01 compare equal).
 //
-// Unknown means no answer: any other % directive (%LR, %LM, %SF, %IPNEG, a
-// stray primitive outside %AM, ...) and G91 (incremental coordinates) make
+// Unknown means no answer: any other % directive (%LR, %LM, %IPNEG, an
+// %OF/%SF/%AS/%MI/%IR that does something, a stray primitive outside %AM, ...) and G91 (incremental coordinates) make
 // the result std::nullopt. So do a %SR in a form the parser misreads, an
 // aperture or macro defined twice, a unit switch after apertures or geometry,
 // and a file cut off mid-statement. So does a region whose outline the parser cannot

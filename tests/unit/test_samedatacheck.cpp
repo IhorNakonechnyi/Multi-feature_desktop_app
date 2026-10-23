@@ -88,6 +88,8 @@ private slots:
     void oldFileHeaderDirectivesAreSameData();
     void asciiInputCodeIsSameData();
     void otherInputCodeIsNeverSameData();
+    void doNothingTransformDirectivesAreSameData();
+    void nearlyDoNothingTransformDirectiveIsNeverSameData();
     void windowsLineEndingsAreSameData();
     void renumberedApertureWithSameShapeIsSameData();
     void reorderedDarkObjectsAreSameData();
@@ -505,6 +507,29 @@ void TestSameDataCheck::asciiInputCodeIsSameData()
 void TestSameDataCheck::otherInputCodeIsNeverSameData()
 {
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA + "%ICEBC*%\n"), gerber(kExportB + "%ICEBC*%\n")));
+}
+
+void TestSameDataCheck::doNothingTransformDirectivesAreSameData()
+{
+    // Old headers that state "no offset, scale 1, normal axes, no mirror, no
+    // rotation". Judged by value, so any spelling of the same numbers counts,
+    // and a file that leaves them out means the same image.
+    const QString header = "%OFA0B0*%\n%SFA1B1*%\n%ASAXBY*%\n%MIA0B0*%\n%IR0*%\n";
+    const QString spelled = "%OFA0.000B-0.0*%\n%SFA1.0000B1.*%\n%ASAXBY*%\n%MIB0*%\n%IR000*%\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + header), gerber(kExportB + header)));
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + header), gerber(kExportB + spelled)));
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA + header), gerber(kExportB)));
+}
+
+void TestSameDataCheck::nearlyDoNothingTransformDirectiveIsNeverSameData()
+{
+    // One digit away from "does nothing" is a real transform the parser does
+    // not apply; a field the form does not have is not understood either.
+    for (const QString &directive : {"%OFA0B0.001*%\n", "%SFA1B1.001*%\n", "%MIA0B1*%\n", "%IR180*%\n",
+                                     "%ASAXBYC*%\n", "%OFA0B0C0*%\n", "%SFA1B1A1*%\n", "%OFA0.0.0*%\n"}) {
+        QVERIFY2(!SameDataCheck::isSameData(gerber(kExportA + directive), gerber(kExportB + directive)),
+                 qPrintable(directive));
+    }
 }
 
 void TestSameDataCheck::strayMacroPrimitiveIsNeverSameData()

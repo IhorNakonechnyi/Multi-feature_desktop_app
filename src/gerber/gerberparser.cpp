@@ -1084,6 +1084,46 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
     return PlainVerdict::Geometry;
 }
 
+// True for an old image-transform directive (deprecated in RS-274X, written
+// by older CAD tools) whose values do nothing: %OF offset 0, %SF scale 1,
+// %AS normal axes, %MI no mirror, %IR rotation 0. The parser applies none of
+// them, so only these values are safe to leave out. Judged by number, not
+// text, so "A0.000" and "A0" are the same; a missing field is the default.
+// `text` is the directive without '%' and '*'.
+bool isDoNothingTransform(const QString &text)
+{
+    static const QString num = QStringLiteral("([+-]?(?:\\d+\\.?\\d*|\\.\\d+))");
+    static const QRegularExpression offset(QStringLiteral("^OF(?:A%1)?(?:B%1)?$").arg(num));
+    static const QRegularExpression scale(QStringLiteral("^SF(?:A%1)?(?:B%1)?$").arg(num));
+    static const QRegularExpression mirror(QStringLiteral("^MI(?:A([01]))?(?:B([01]))?$"));
+    static const QRegularExpression rotation(QStringLiteral("^IR(\\d+)$"));
+    // Each absent field (an empty capture) counts as the default value.
+    const auto allFieldsAre = [](const QRegularExpressionMatch &match, double value) {
+        for (int field = 1; field <= 2; ++field) {
+            if (match.hasCaptured(field) && match.captured(field).toDouble() != value) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (text == QLatin1String("ASAXBY")) {
+        return true;
+    }
+    if (const QRegularExpressionMatch match = offset.match(text); match.hasMatch()) {
+        return allFieldsAre(match, 0.0);
+    }
+    if (const QRegularExpressionMatch match = scale.match(text); match.hasMatch()) {
+        return allFieldsAre(match, 1.0);
+    }
+    if (const QRegularExpressionMatch match = mirror.match(text); match.hasMatch()) {
+        return allFieldsAre(match, 0.0);
+    }
+    if (const QRegularExpressionMatch match = rotation.match(text); match.hasMatch()) {
+        return match.captured(1).toInt() == 0;
+    }
+    return false;
+}
+
 } // namespace
 
 Layer GerberParser::parseContentToObjects(const QString &content)
@@ -1225,6 +1265,12 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
             if (text == QLatin1String("ICAS")) {
                 continue;
             }
+            // %OF %SF %AS %MI %IR with values that do nothing (see
+            // isDoNothingTransform). Any other value falls through to the
+            // refuse group: the parser would not apply it.
+            if (isDoNothingTransform(text)) {
+                continue;
+            }
 
             // Macro definitions (the %AM header and its body lines) are
             // skipped too. Altium names a macro after its D-code, so a
@@ -1300,7 +1346,8 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
                 continue;
             }
 
-            // Group 3 - REFUSE: everything else (%LR, %LM, %SF, %OF, %IPNEG,
+            // Group 3 - REFUSE: everything else (%LR, %LM, %IPNEG, an
+            // %OF/%SF/%AS/%MI/%IR that does something,
             // a primitive outside any %AM, directives we have never heard of).
             // The parser ignores or does not know them, and where they sit
             // relative to the objects is not compared, so equal text in both
