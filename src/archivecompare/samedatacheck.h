@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 
+#include "../gerber/gerberobjectmodel.h"
 #include "archivecomparisonresult.h"
 
 // The second look at a yellow pair. The CRC comparison calls two files
@@ -30,9 +31,15 @@ namespace SameDataCheck {
 //    answer", and if either file holds something the parser cannot vouch
 //    for that way, the pair is never same.
 //
-// Anything unparseable, or a layer with no objects at all, is never "same":
-// an empty parse proves nothing about what the file contains.
+// Anything unparseable is never "same". Two layers with no objects are the
+// same only when neither file left a draw, flash or hole line out of the
+// text comparison (sameObjectsOrBothEmpty).
 bool isSameData(const QByteArray &bytesA, const QByteArray &bytesB);
+
+// Step 1 of the rule above, shared with SameDataDiagnosis so the two always
+// agree. `drawLeftOut`: either file left a draw, flash or hole line out of
+// its text list (the drawLeftOut flag of nonGeometryStatements/Lines).
+bool sameObjectsOrBothEmpty(const Layer &layerA, const Layer &layerB, bool drawLeftOut);
 
 using PairPredicate = std::function<bool(const DifferingPair &pair)>;
 

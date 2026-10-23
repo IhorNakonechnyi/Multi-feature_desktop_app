@@ -11,6 +11,19 @@
 #include "../gerber/gerberparser.h"
 #include "../gerber/layerequivalence.h"
 
+bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &layerB, bool drawLeftOut)
+{
+    // Two layers that draw nothing (an unused paste or mask layer) are the
+    // same image. But "no objects" is trusted only when nothing that should
+    // have drawn was left out of the text comparison: those lines were
+    // compared through the objects alone, and with no objects nothing
+    // compared them at all.
+    if (layerA.objects.isEmpty() && layerB.objects.isEmpty()) {
+        return !drawLeftOut;
+    }
+    return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
+}
+
 bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytesB)
 {
     // Content decides the kind, the same way the overlay decides which parser
@@ -27,25 +40,29 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         // The cheaper test first: on a real change the non-geometry lines
         // usually differ already, and the full parse is skipped.
         // nullopt = the parser cannot vouch for that file: never same data.
-        const auto restA = GerberParser::nonGeometryStatements(textA);
-        const auto restB = GerberParser::nonGeometryStatements(textB);
+        bool drawLeftOutA = false;
+        bool drawLeftOutB = false;
+        const auto restA = GerberParser::nonGeometryStatements(textA, nullptr, &drawLeftOutA);
+        const auto restB = GerberParser::nonGeometryStatements(textB, nullptr, &drawLeftOutB);
         if (!restA || !restB || *restA != *restB) {
             return false;
         }
         const Layer layerA = GerberParser::parseContentToObjects(textA);
         const Layer layerB = GerberParser::parseContentToObjects(textB);
-        return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
+        return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
     }
 
-    const auto restA = ExcellonParser::nonGeometryLines(textA);
-    const auto restB = ExcellonParser::nonGeometryLines(textB);
+    bool drawLeftOutA = false;
+    bool drawLeftOutB = false;
+    const auto restA = ExcellonParser::nonGeometryLines(textA, nullptr, &drawLeftOutA);
+    const auto restB = ExcellonParser::nonGeometryLines(textB, nullptr, &drawLeftOutB);
     if (!restA || !restB || *restA != *restB) {
         return false;
     }
     try {
         const Layer layerA = ExcellonParser::parseContentToObjects(textA);
         const Layer layerB = ExcellonParser::parseContentToObjects(textB);
-        return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
+        return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
     } catch (const ExcellonParser::AmbiguousFormatError &) {
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }

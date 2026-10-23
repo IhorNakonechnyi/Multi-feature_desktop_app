@@ -59,6 +59,11 @@ Layer parseContentToObjects(const QString &content);
 //
 // `refusal` (optional, diagnostics only) is filled with the rule and the
 // line that made the result std::nullopt.
-std::optional<QStringList> nonGeometryLines(const QString &content, SameDataRefusal *refusal = nullptr);
+//
+// `drawLeftOut` (optional) is set to true when a hole or rout line was left
+// out of the list. A file with no objects is only "nothing drawn" when this
+// stays false.
+std::optional<QStringList> nonGeometryLines(const QString &content, SameDataRefusal *refusal = nullptr,
+                                            bool *drawLeftOut = nullptr);
 
 } // namespace ExcellonParser

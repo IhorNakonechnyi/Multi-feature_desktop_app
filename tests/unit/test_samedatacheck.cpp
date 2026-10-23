@@ -109,7 +109,9 @@ private slots:
     void changedMacroRecipeIsDifferent();
     void redefinedMacroIsNeverSameData();
     void unusedMacroDifferenceIsSameData();
-    void layerWithNoObjectsIsNeverSameData();
+    void emptyLayersAreSameData();
+    void emptyAndNonEmptyLayersAreDifferent();
+    void emptyLayerWithLeftOutCoordinatesIsNeverSameData();
     void gerberAndDrillAreNeverSameData();
     void unparseableBytesAreNeverSameData();
     void positiveFilePolarityEqualsMissing();
@@ -181,6 +183,7 @@ private slots:
     void diagnosisSeesReorderedRegionArcs();
     void diagnosisCountsObjectDifferences();
     void diagnosisPassesForSameData();
+    void diagnosisPassesForEmptyLayers();
 };
 
 void TestSameDataCheck::noiseWordsMatchOnlyAsTheFirstWholeWord()
@@ -497,9 +500,29 @@ void TestSameDataCheck::strayMacroPrimitiveIsNeverSameData()
                                        gerber(kExportB + "%1,1,0.5,0,0*%\n")));
 }
 
-void TestSameDataCheck::layerWithNoObjectsIsNeverSameData()
+void TestSameDataCheck::emptyLayersAreSameData()
 {
-    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, ""), gerber(kExportB, "")));
+    // A layer the board leaves empty (apertures or tools defined, nothing
+    // drawn) is re-exported as an empty layer again: nothing to show, same data.
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, ""), gerber(kExportB, "")));
+    QVERIFY(SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", ""),
+                                      drill(kDrillExportB, "T01C0.300\n", "")));
+}
+
+void TestSameDataCheck::emptyAndNonEmptyLayersAreDifferent()
+{
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, ""), gerber(kExportB)));
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", ""), drill(kDrillExportB)));
+}
+
+void TestSameDataCheck::emptyLayerWithLeftOutCoordinatesIsNeverSameData()
+{
+    // Rout mode with the tool never lowered: the parser draws nothing, so
+    // both sides have no objects. But the bare coordinate lines were left out
+    // of the text as geometry and differ - nothing has compared them, so an
+    // empty result cannot vouch for the pair.
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", "G00X1.0Y1.0\nX2.0Y2.0\n"),
+                                       drill(kDrillExportB, "T01C0.300\n", "G00X1.0Y1.0\nX3.0Y3.0\n")));
 }
 
 void TestSameDataCheck::gerberAndDrillAreNeverSameData()
@@ -1169,6 +1192,12 @@ void TestSameDataCheck::diagnosisPassesForSameData()
 {
     QCOMPARE(SameDataDiagnosis::explain(gerber(kExportA), gerber(kExportB)),
              QString("Same-data check: all steps pass - same data"));
+}
+
+void TestSameDataCheck::diagnosisPassesForEmptyLayers()
+{
+    QCOMPARE(SameDataDiagnosis::explain(gerber(kExportA, ""), gerber(kExportB, "")),
+             QString("Same-data check: all steps pass - same data (both layers draw nothing)"));
 }
 
 QTEST_MAIN(TestSameDataCheck)

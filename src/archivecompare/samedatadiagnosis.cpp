@@ -13,6 +13,7 @@
 #include "../gerber/gerberparser.h"
 #include "../gerber/layerequivalence.h"
 #include "../gerber/samedatarefusal.h"
+#include "samedatacheck.h"
 
 namespace {
 
@@ -318,10 +319,14 @@ QString SameDataDiagnosis::explain(const QByteArray &bytesA, const QByteArray &b
     // Step 1 and 2: the non-geometry lists, exactly as isSameData builds them.
     SameDataRefusal refusalA;
     SameDataRefusal refusalB;
-    const std::optional<QStringList> restA = isGerber ? GerberParser::nonGeometryStatements(textA, &refusalA)
-                                                      : ExcellonParser::nonGeometryLines(textA, &refusalA);
-    const std::optional<QStringList> restB = isGerber ? GerberParser::nonGeometryStatements(textB, &refusalB)
-                                                      : ExcellonParser::nonGeometryLines(textB, &refusalB);
+    bool drawLeftOutA = false;
+    bool drawLeftOutB = false;
+    const std::optional<QStringList> restA = isGerber
+        ? GerberParser::nonGeometryStatements(textA, &refusalA, &drawLeftOutA)
+        : ExcellonParser::nonGeometryLines(textA, &refusalA, &drawLeftOutA);
+    const std::optional<QStringList> restB = isGerber
+        ? GerberParser::nonGeometryStatements(textB, &refusalB, &drawLeftOutB)
+        : ExcellonParser::nonGeometryLines(textB, &refusalB, &drawLeftOutB);
     if (!restA || !restB) {
         QStringList lines;
         if (!restA) {
@@ -350,6 +355,10 @@ QString SameDataDiagnosis::explain(const QByteArray &bytesA, const QByteArray &b
             return QStringLiteral("Same-data check: text lines match, but the drill coordinate format "
                                   "can't be decoded");
         }
+    }
+    if (layerA.objects.isEmpty() && layerB.objects.isEmpty()
+        && SameDataCheck::sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB)) {
+        return QStringLiteral("Same-data check: all steps pass - same data (both layers draw nothing)");
     }
     if (layerA.objects.isEmpty() || layerB.objects.isEmpty()) {
         return QStringLiteral("Same-data check: text lines match, but a side parsed to no objects (A %1, B %2)")

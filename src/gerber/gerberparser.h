@@ -66,7 +66,12 @@ QPainterPath parseContent(const QString &content);
 //
 // `refusal` (optional, diagnostics only) is filled with the rule and the
 // statement that made the result std::nullopt.
-std::optional<QStringList> nonGeometryStatements(const QString &content, SameDataRefusal *refusal = nullptr);
+//
+// `drawLeftOut` (optional) is set to true when a draw or flash (D01/D03) was
+// left out of the list - so the parse must have produced an object for it.
+// A file with no objects is only "nothing drawn" when this stays false.
+std::optional<QStringList> nonGeometryStatements(const QString &content, SameDataRefusal *refusal = nullptr,
+                                                 bool *drawLeftOut = nullptr);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an

@@ -881,6 +881,8 @@ struct GeometryWalk {
     bool regionStarted = false;         // the region's first operation (a D02) was met
     bool regionMovedAfterStart = false; // a further D02 came after that
     int regionVertexCount = 0;          // vertices the parser will record
+    // True once a draw or flash (D01/D03) has been left out as geometry.
+    bool drawLeftOut = false;
     // Set just before classifyPlain returns Refuse: which rule it was, for
     // the diagnostic line (SameDataRefusal). The verdict never depends on it.
     const char *refuseRule = nullptr;
@@ -1076,6 +1078,9 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
     if (hasOffset && (operation != 1 || !walk.arcInterpolation || walk.insideRegion)) {
         return PlainVerdict::KeepAsText;
     }
+    if (operation != 2) {
+        walk.drawLeftOut = true;
+    }
     return PlainVerdict::Geometry;
 }
 
@@ -1094,7 +1099,8 @@ QPainterPath GerberParser::parseContent(const QString &content)
     return flattenAndCompositeForLegacyRender(layer);
 }
 
-std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content, SameDataRefusal *refusal)
+std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &content, SameDataRefusal *refusal,
+                                                               bool *drawLeftOut)
 {
     // Every "no answer" goes through here, so the diagnostic can say which
     // rule it was and where. `position` is the statement being looked at.
@@ -1340,6 +1346,9 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
     // outline would be lost.
     if (walk.insideRegion && walk.regionStarted) {
         return refuse("region never closed by G37", QString());
+    }
+    if (drawLeftOut) {
+        *drawLeftOut = walk.drawLeftOut;
     }
     return kept;
 }

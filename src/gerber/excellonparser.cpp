@@ -345,8 +345,12 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     return layer;
 }
 
-std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal)
+std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal,
+                                                            bool *drawLeftOut)
 {
+    if (drawLeftOut) {
+        *drawLeftOut = false;
+    }
     // Every "no answer" goes through here, so the diagnostic can say which
     // rule it was and on which line.
     int lineNumber = 0;
@@ -446,6 +450,9 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
         // skipped above, so a match here always has at least one of X/Y.
         if (holeOrModalMove.match(line).hasMatch() || linearOrRoutMove.match(line).hasMatch()
             || arcMove.match(line).hasMatch()) {
+            if (drawLeftOut) {
+                *drawLeftOut = true;
+            }
             continue; // a hole or a rout move - lives in the object model
         }
 
