@@ -559,6 +559,35 @@ void emitArcStroke(ParserState &state, const QPointF &from, const QPointF &to, c
     emitObject(state, object);
 }
 
+// Finishes the contour being collected inside G36..G37 - at G37, or at a
+// D02, which per the Gerber spec (4.10) ends the current contour and starts
+// a new one. Each contour is filled on its own and the region is the union
+// of them, so each becomes its own Region GraphicObject carrying its
+// vertices and edges (the flatten stage closes and fills the outline
+// later, the same way a flash or stroke is resolved later).
+//
+// A contour needs 3 points to enclose an area - or fewer with an arc edge
+// (a round contour is one start point and one full-circle arc). Anything
+// less, such as a D02 that no D01 follows, encloses nothing: no object.
+void finishRegionContour(ParserState &state)
+{
+    const bool hasArc = std::any_of(state.regionEdges.begin(), state.regionEdges.end(),
+                                    [](const RegionEdge &edge) { return edge.isArc; });
+    if (state.regionPoints.size() >= 3 || (state.regionPoints.size() >= 2 && hasArc)) {
+        GraphicObject object;
+        object.type = ObjectType::Region;
+        object.polarity = state.currentPolarity;
+        object.regionPoints.reserve(state.regionPoints.size());
+        for (const QPointF &vertex : state.regionPoints) {
+            object.regionPoints.append(toNm(vertex));
+        }
+        object.regionEdges = state.regionEdges;
+        emitObject(state, object);
+    }
+    state.regionPoints.clear();
+    state.regionEdges.clear();
+}
+
 // ---------------------------------------------------------------------------
 // Reconstruction: resolve the object model back to the legacy flattened path
 // ---------------------------------------------------------------------------
@@ -688,27 +717,9 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             continue;
         }
         if (text.startsWith(QLatin1String("G37"))) {
-            // Closes the region: emit it as a Region GraphicObject carrying
-            // the collected contour vertices and edges (the flatten stage
-            // closes and fills the outline later, the same way a flash or
-            // stroke is resolved later). It needs 3 points to enclose an
-            // area - or fewer with an arc edge (a round region is one start
-            // point and one full-circle arc). Anything less never got real
-            // coordinate data (malformed input) - nothing to emit.
+            // Closes the region statement and its last contour.
             state.insideRegion = false;
-            const bool hasArc = std::any_of(state.regionEdges.begin(), state.regionEdges.end(),
-                                            [](const RegionEdge &edge) { return edge.isArc; });
-            if (state.regionPoints.size() >= 3 || (state.regionPoints.size() >= 2 && hasArc)) {
-                GraphicObject object;
-                object.type = ObjectType::Region;
-                object.polarity = state.currentPolarity;
-                object.regionPoints.reserve(state.regionPoints.size());
-                for (const QPointF &vertex : state.regionPoints) {
-                    object.regionPoints.append(toNm(vertex));
-                }
-                object.regionEdges = state.regionEdges;
-                emitObject(state, object);
-            }
+            finishRegionContour(state);
             continue;
         }
         // RS-274X function codes may omit leading zeros: "G1" means G01,
@@ -846,6 +857,15 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             // destination when a region starts at the origin. See
             // regionOpeningMoveStartsFromItsOwnDestination for the
             // regression this guards against.
+            //
+            // A later D02 finishes the contour so far and starts the next one
+            // at its own destination, the same way. Joining the next contour
+            // onto the last one instead (what the parser once did) drew an
+            // arc that follows the move from the wrong start point - with
+            // the wrong radius, a loop across the board.
+            if (opCode == 2 && !state.regionPoints.isEmpty()) {
+                finishRegionContour(state);
+            }
             if (state.regionPoints.isEmpty()) {
                 state.regionPoints << state.currentPoint;
                 state.regionEdges << RegionEdge{}; // the start has no edge
@@ -1098,13 +1118,13 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
 
     // The region outline rule. Inside G36..G37 the parser records the
     // destination of the region's first operation as the start vertex and
-    // then one vertex per D01 - every later D02 is dropped. That is exact
-    // for the usual outline, and for Altium's, which ends every region with
-    // a D02 that no D01 follows:
+    // then one vertex per D01; a later D02 finishes that outline and starts
+    // the next. For the usual outline, and for Altium's, which ends every
+    // region with a D02 that no D01 follows, that is one region object:
     //     G36 -> D02 (start) -> D01 x N -> D02 -> G37
     // A D02 is harmless as long as no D01 comes after it. A D01 after it
-    // starts a real second outline, joined by the parser onto the first -
-    // that is what refuses. The first operation must be a D02 with
+    // starts a real second outline - a second region object, which this
+    // walk does not count yet, so it refuses. The first operation must be a D02 with
     // coordinates: a D01 there starts from the pen position before G36,
     // which the parser does not record, and a bare "D02*" does not reach
     // the region code at all. A D03 (flash) is not allowed in a region and

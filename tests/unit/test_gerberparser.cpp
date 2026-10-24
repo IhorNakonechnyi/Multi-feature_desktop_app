@@ -60,6 +60,10 @@ private slots:
     void singleQuadrantArcWithNoShortWayRoundIsStraight();
     void fullCircleRegionIsEmitted();
     void stepAndRepeatMovesRegionArcCenters();
+    void secondContourInARegionIsItsOwnRegion();
+    void roundContourAfterAMoveIsADisc();
+    void singleQuadrantContourAfterAMoveKeepsItsArcs();
+    void trailingMoveBeforeRegionEndAddsNoRegion();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -1195,6 +1199,105 @@ void TestGerberParser::stepAndRepeatMovesRegionArcCenters()
     QCOMPARE(layer.objects.at(1).regionEdges.at(3).arcCenter.y, GerberFormat::mmToNm(5.0));
     // A straight edge has no center to move.
     QCOMPARE(layer.objects.at(1).regionEdges.at(1).arcCenter.x, 0);
+}
+
+namespace {
+
+// A 2 mm square from (0,0), closed, inside an open G36 - the caller adds
+// the rest of the region and the G37.
+const char *const kSquareContour =
+    "%FSLAX24Y24*%\n"
+    "%MOMM*%\n"
+    "G36*\n"
+    "X000000Y000000D02*\n"
+    "G01X020000Y000000D01*\n"
+    "X020000Y020000D01*\n"
+    "X000000Y020000D01*\n"
+    "X000000Y000000D01*\n";
+
+} // namespace
+
+void TestGerberParser::secondContourInARegionIsItsOwnRegion()
+{
+    // A D02 inside G36..G37 finishes the contour and starts a new one, and
+    // each contour is filled on its own (Gerber spec 4.10). The parser used
+    // to drop the D02 and join the second square onto the first.
+    const QString content = QString(kSquareContour)
+        + "X050000Y050000D02*\n"
+          "X070000Y050000D01*\n"
+          "X070000Y070000D01*\n"
+          "X050000Y070000D01*\n"
+          "X050000Y050000D01*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    QCOMPARE(layer.objects.at(0).regionPoints.size(), 5);
+    QCOMPARE(layer.objects.at(1).regionPoints.size(), 5);
+    QCOMPARE(layer.objects.at(1).regionPoints.at(0).x, GerberFormat::mmToNm(5.0));
+    QCOMPARE(layer.objects.at(1).regionPoints.at(0).y, GerberFormat::mmToNm(5.0));
+}
+
+void TestGerberParser::roundContourAfterAMoveIsADisc()
+{
+    // After the square, a D02 to (7,0) and one full circle around (6,0).
+    // Joined onto the square, that arc started at (0,0): radius 6, a huge
+    // loop instead of a 1 mm disc.
+    const QString content = QString(kSquareContour)
+        + "G75*\n"
+          "X070000Y000000D02*\n"
+          "G03X070000Y000000I-010000J000000D01*\n"
+          "G37*\n";
+
+    QCOMPARE(GerberParser::parseContentToObjects(content).objects.size(), 2);
+    const QPainterPath path = GerberParser::parseContent(content);
+    QVERIFY(path.contains(QPointF(6.0, 0.0)));
+    QVERIFY(path.contains(QPointF(1.0, 1.0)));
+    const QRectF bounds = path.boundingRect();
+    QVERIFY(bounds.left() > -0.01 && bounds.right() < 7.01);
+    QVERIFY(bounds.top() > -1.01 && bounds.bottom() < 2.01);
+}
+
+void TestGerberParser::singleQuadrantContourAfterAMoveKeepsItsArcs()
+{
+    // The same disc in G74: four quarter arcs, unsigned offsets.
+    const QString content = QString(kSquareContour)
+        + "G74*\n"
+          "X070000Y000000D02*\n"
+          "G03X060000Y010000I010000J000000D01*\n"
+          "X050000Y000000I000000J010000D01*\n"
+          "X060000Y-010000I010000J000000D01*\n"
+          "X070000Y000000I000000J010000D01*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    const GraphicObject &disc = layer.objects.at(1);
+    QCOMPARE(disc.regionPoints.size(), 5);
+    for (int i = 1; i < disc.regionEdges.size(); ++i) {
+        QVERIFY(disc.regionEdges.at(i).isArc);
+        QCOMPARE(disc.regionEdges.at(i).arcCenter.x, GerberFormat::mmToNm(6.0));
+        QCOMPARE(disc.regionEdges.at(i).arcCenter.y, GerberFormat::mmToNm(0.0));
+    }
+    const QRectF bounds = GerberParser::parseContent(content).boundingRect();
+    QVERIFY(bounds.right() < 7.01 && bounds.top() > -1.01);
+}
+
+void TestGerberParser::trailingMoveBeforeRegionEndAddsNoRegion()
+{
+    // A D02 that no D01 follows starts a contour with no edges: nothing to
+    // fill, so the region is still the one square. The same-data check
+    // relies on this when it leaves such a D02 out.
+    const QString content = QString(kSquareContour)
+        + "X090000Y090000D02*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).regionPoints.size(), 5);
 }
 
 QTEST_MAIN(TestGerberParser)
