@@ -58,7 +58,7 @@ bool isPlainSyntax(const QString &masked)
     }
     static const QStringList commandWords = {
         QStringLiteral("INCH"), QStringLiteral("METRIC"), QStringLiteral("FMAT"), QStringLiteral("ICI"),
-        QStringLiteral("VER"),  QStringLiteral("POS"),    QStringLiteral("NEG"),
+        QStringLiteral("VER"),  QStringLiteral("POS"),    QStringLiteral("NEG"),  QStringLiteral("OFF"),
     };
     static const QRegularExpression letterRun(QStringLiteral("[A-Z]{3,}"));
     QRegularExpressionMatchIterator it = letterRun.globalMatch(masked);

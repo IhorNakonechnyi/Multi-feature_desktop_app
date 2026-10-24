@@ -1279,6 +1279,8 @@ void TestSameDataCheck::diagnosisShapesHideEveryValue()
     // Drill
     QCOMPARE(shapeOf("T01C0.300", false), QString("T#C#"));
     QCOMPARE(shapeOf("METRIC,TZ", false), QString("METRIC,TZ"));
+    QCOMPARE(shapeOf("ICI,OFF", false), QString("ICI,OFF"));
+    QCOMPARE(shapeOf("ICI,ON", false), QString("ICI,ON"));
     QCOMPARE(shapeOf(";job: C:\\work\\board.job", false), QString(";..."));
     QCOMPARE(shapeOf("X1.5Y-2.25", false), QString("X#Y#"));
 }
