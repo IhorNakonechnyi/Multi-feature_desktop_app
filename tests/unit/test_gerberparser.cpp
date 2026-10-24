@@ -53,6 +53,11 @@ private slots:
     void regionArcEdgeIsKept();
     void regionArcIsDrawnAsACurve();
     void singleQuadrantRegionArcResolvesItsCenter();
+    void singleQuadrantCornerJustPastAQuarterTurnKeepsItsCenter();
+    void singleQuadrantClockwiseArcJustPastAQuarterTurnKeepsItsCenter();
+    void singleQuadrantArcTakesTheShortWayRound();
+    void singleQuadrantArcWithEqualEndsIsNotARing();
+    void singleQuadrantArcWithNoShortWayRoundIsStraight();
     void fullCircleRegionIsEmitted();
     void stepAndRepeatMovesRegionArcCenters();
 };
@@ -1043,6 +1048,120 @@ void TestGerberParser::singleQuadrantRegionArcResolvesItsCenter()
     QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
     // Inside the quarter disc, beyond the chord from (2,0) to (0,2).
     QVERIFY(GerberParser::parseContent(content).contains(QPointF(1.2, 1.2)));
+}
+
+void TestGerberParser::singleQuadrantCornerJustPastAQuarterTurnKeepsItsCenter()
+{
+    // A rounded corner whose end point the file rounded a hair past the
+    // quarter turn: (2,0) to (-0.001,2) around (0,0) is 90.03 degrees. A
+    // strict 90-degree limit rejected every sign choice and fell back to
+    // the unsigned offset, putting the center at (4,0) and drawing a near-
+    // full loop that reaches out to x = 6.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G74*\n"
+        "G36*\n"
+        "X000000Y000000D02*\n"
+        "G01X020000Y000000D01*\n"
+        "G03X-000010Y020000I020000J000000D01*\n"
+        "G01X000000Y000000D01*\n"
+        "G37*\n";
+
+    const RegionEdge arc = GerberParser::parseContentToObjects(content).objects.at(0).regionEdges.at(2);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
+    const QPainterPath path = GerberParser::parseContent(content);
+    QVERIFY(path.contains(QPointF(1.2, 1.2)));
+    QVERIFY(path.boundingRect().right() < 2.1);
+}
+
+void TestGerberParser::singleQuadrantClockwiseArcJustPastAQuarterTurnKeepsItsCenter()
+{
+    // The same rounding, clockwise, on an arc stroke: (0,2) to (2,-0.001)
+    // around (0,0). The wrong center would be (0,4).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X000000Y020000D2*\n"
+        "G02X020000Y-000010I000000J020000D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QVERIFY(layer.objects.at(0).isArc);
+    QCOMPARE(layer.objects.at(0).arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects.at(0).arcCenter.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::singleQuadrantArcTakesTheShortWayRound()
+{
+    // From (0,0) to (2,0) with offsets 1,1: both (1,1) and (1,-1) are 1.41
+    // from either end, so the distances cannot choose. Counterclockwise,
+    // (1,1) gives a 90-degree arc and (1,-1) a 270-degree one - G74 means
+    // the short one.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X000000Y000000D2*\n"
+        "G03X020000Y000000I010000J010000D1*\n"
+        "M02*\n";
+
+    const GraphicObject arc = GerberParser::parseContentToObjects(content).objects.at(0);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(1.0));
+}
+
+void TestGerberParser::singleQuadrantArcWithEqualEndsIsNotARing()
+{
+    // Equal end points make a full circle only in G75. A G74 arc spans at
+    // most a quarter turn, so this draws nothing more than a straight
+    // stroke of zero length would.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X010000Y000000D2*\n"
+        "G03X010000Y000000I010000J000000D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).type, ObjectType::Stroke);
+    QVERIFY(!layer.objects.at(0).isArc);
+}
+
+void TestGerberParser::singleQuadrantArcWithNoShortWayRoundIsStraight()
+{
+    // Zero offsets put the center on the start point: from (2,0) to (2,-1)
+    // counterclockwise that is a 270-degree turn, and no sign choice
+    // changes it. No G74 arc turns that far, so the edge is drawn straight.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G74*\n"
+        "G36*\n"
+        "X000000Y000000D02*\n"
+        "G01X020000Y000000D01*\n"
+        "G03X020000Y-010000I000000J000000D01*\n"
+        "G01X000000Y000000D01*\n"
+        "G37*\n";
+
+    const GraphicObject region = GerberParser::parseContentToObjects(content).objects.at(0);
+    QVERIFY(!region.regionEdges.at(2).isArc);
+    QCOMPARE(region.regionEdges.at(2).arcCenter.x, 0);
 }
 
 void TestGerberParser::fullCircleRegionIsEmitted()

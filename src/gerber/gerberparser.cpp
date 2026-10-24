@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <utility>
 
 #include <QFile>
@@ -182,24 +183,31 @@ PointNm toNm(const QPointF &mm)
     return PointNm{GerberFormat::mmToNm(mm.x()), GerberFormat::mmToNm(mm.y())};
 }
 
-// G74 single-quadrant arcs give I/J as unsigned distances; of the four
-// possible sign combinations for the center offset, exactly one yields a
-// geometrically valid arc: both endpoints (nearly) equidistant from the
-// center, sweeping at most 90 degrees in the commanded direction. Try
-// all four and pick the best match by radius consistency, breaking ties
-// by the smaller sweep. Falls back to the offsets as given if nothing
-// qualifies (defensive - a malformed arc then behaves like today's
-// signed interpretation instead of vanishing).
-QPointF resolveSingleQuadrantCenterOffset(const QPointF &from, const QPointF &to, const QPointF &offset,
-                                          bool counterClockwise)
+// G74 single-quadrant arcs give I/J as unsigned distances, so there are
+// four possible centers, one per sign combination. The right one is the
+// center both end points are (nearly) the same distance from - the wrong
+// ones are usually far off. The distance alone cannot choose when a wrong
+// center mirrors the right one across the chord: both then fit, and their
+// two arcs make up a full circle together (90 + 270 degrees, say).
+//
+// So: keep the candidates that turn at most HALF a turn in the commanded
+// direction, and of those take the best distance fit. The cut is at 180
+// degrees, not at G74's own 90, on purpose: real files round their end
+// points, so a quarter-circle corner often comes out at 90.03 degrees - a
+// 90-degree cut rejected every candidate there and drew a near-full loop.
+// A right arc is 90 plus rounding, a mirrored wrong one 270 minus it, so
+// 180 sits far from both.
+//
+// No candidate under half a turn means no valid arc (a malformed file):
+// nullopt, and the caller draws the edge straight rather than a loop.
+std::optional<QPointF> resolveSingleQuadrantCenterOffset(const QPointF &from, const QPointF &to,
+                                                         const QPointF &offset, bool counterClockwise)
 {
-    constexpr double kQuarterTurn = std::numbers::pi / 2.0;
     const double absI = std::abs(offset.x());
     const double absJ = std::abs(offset.y());
 
-    QPointF best = offset;
+    std::optional<QPointF> best;
     double bestMismatch = std::numeric_limits<double>::max();
-    double bestSweep = std::numeric_limits<double>::max();
     for (const double signX : {1.0, -1.0}) {
         for (const double signY : {1.0, -1.0}) {
             const QPointF candidateOffset(signX * absI, signY * absJ);
@@ -214,13 +222,11 @@ QPointF resolveSingleQuadrantCenterOffset(const QPointF &from, const QPointF &to
             double sweep = counterClockwise ? (endAngle - startAngle) : (startAngle - endAngle);
             sweep = std::fmod(sweep + 4.0 * std::numbers::pi, 2.0 * std::numbers::pi);
 
-            if (sweep > kQuarterTurn + 1e-9) {
-                continue; // single-quadrant arcs never exceed 90 degrees
+            if (sweep > std::numbers::pi) {
+                continue; // the long way round - see above
             }
-            if (mismatch < bestMismatch - 1e-9
-                || (std::abs(mismatch - bestMismatch) <= 1e-9 && sweep < bestSweep)) {
+            if (mismatch < bestMismatch) {
                 bestMismatch = mismatch;
-                bestSweep = sweep;
                 best = candidateOffset;
             }
         }
@@ -506,9 +512,16 @@ void emitLinearStroke(ParserState &state, const QPointF &from, const QPointF &to
 // spec. Each field is bounded the same way applyCoordinateToken bounds X/Y,
 // so I's digits stop at J rather than running to the end of the string.
 // Used for arc strokes and for arc edges of a region alike.
-QPointF arcCenter(const ParserState &state, const QString &coordinatePart, const QPointF &from,
-                  bool counterClockwise)
+//
+// nullopt means the draw is not an arc after all and is drawn straight: a
+// G74 arc with equal end points (only G75 makes that a full circle; a G74
+// arc spans at most a quarter turn), or one no center fits.
+std::optional<QPointF> arcCenter(const ParserState &state, const QString &coordinatePart, const QPointF &from,
+                                 bool counterClockwise)
 {
+    if (state.singleQuadrantArcs && from == state.currentPoint) {
+        return std::nullopt;
+    }
     const int iIndex = coordinatePart.indexOf(QLatin1Char('I'));
     const int jIndex = coordinatePart.indexOf(QLatin1Char('J'));
     QPointF centerOffset(0.0, 0.0);
@@ -521,8 +534,12 @@ QPointF arcCenter(const ParserState &state, const QString &coordinatePart, const
         centerOffset.setY(state.format.decodeCoordinateMm(coordinatePart.mid(jIndex + 1, end - jIndex - 1)));
     }
     if (state.singleQuadrantArcs) {
-        centerOffset =
+        const std::optional<QPointF> resolved =
             resolveSingleQuadrantCenterOffset(from, state.currentPoint, centerOffset, counterClockwise);
+        if (!resolved) {
+            return std::nullopt;
+        }
+        centerOffset = *resolved;
     }
     return from + centerOffset;
 }
@@ -840,13 +857,15 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
                 if (state.interpolationMode != ParserState::InterpolationMode::Linear) {
                     edge.arcCounterClockwise =
                         state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
-                    edge.arcCenter =
-                        toNm(arcCenter(state, coordinatePart, previousPoint, edge.arcCounterClockwise));
-                    // G74 arcs span at most 90 degrees, so equal end points
-                    // draw nothing; only a G75 arc closes into a full circle.
-                    edge.isArc = !(state.singleQuadrantArcs && previousPoint == state.currentPoint);
-                    if (!edge.isArc) {
-                        edge.arcCenter = PointNm{};
+                    const std::optional<QPointF> center =
+                        arcCenter(state, coordinatePart, previousPoint, edge.arcCounterClockwise);
+                    // No center: the edge is straight, and a straight edge
+                    // keeps its center at (0,0).
+                    edge.isArc = center.has_value();
+                    if (center) {
+                        edge.arcCenter = toNm(*center);
+                    } else {
+                        edge.arcCounterClockwise = false;
                     }
                 }
                 state.regionPoints << state.currentPoint;
@@ -856,8 +875,12 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             // An arc draw: center from its I/J offsets (see arcCenter).
             const bool counterClockwise =
                 state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
-            const QPointF center = arcCenter(state, coordinatePart, previousPoint, counterClockwise);
-            emitArcStroke(state, previousPoint, state.currentPoint, center, counterClockwise);
+            const std::optional<QPointF> center = arcCenter(state, coordinatePart, previousPoint, counterClockwise);
+            if (center) {
+                emitArcStroke(state, previousPoint, state.currentPoint, *center, counterClockwise);
+            } else {
+                emitLinearStroke(state, previousPoint, state.currentPoint);
+            }
         } else if (opCode == 1) {
             emitLinearStroke(state, previousPoint, state.currentPoint);
         } else if (opCode == 3) {
