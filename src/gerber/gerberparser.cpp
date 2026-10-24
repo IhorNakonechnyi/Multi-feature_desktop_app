@@ -964,16 +964,32 @@ struct GeometryWalk {
     bool operationSeen = false;
     int modalOperation = 0; // the D01/D02/D03 bare coordinates repeat
     bool insideRegion = false; // between G36 and G37
+    // G74 single-quadrant arcs (see the region rule in classifyPlain). The
+    // parse loop starts in G75.
+    bool singleQuadrantArcs = false;
     // Region outline bookkeeping (see the region rule in classifyPlain).
-    bool regionStarted = false;         // the region's first operation (a D02) was met
-    bool regionMovedAfterStart = false; // a further D02 came after that
-    int regionVertexCount = 0;          // vertices the parser will record
+    bool regionStarted = false;     // the region's first operation (a D02) was met
+    bool regionMovePending = false; // a later D02 came: the next D01 starts a new outline
+    int regionVertexCount = 0;      // vertices the parser records for the current outline
+    bool regionHasArcEdge = false;  // ... and whether one of its edges is surely an arc
     // True once a draw or flash (D01/D03) has been left out as geometry.
     bool drawLeftOut = false;
     // Set just before classifyPlain returns Refuse: which rule it was, for
     // the diagnostic line (SameDataRefusal). The verdict never depends on it.
     const char *refuseRule = nullptr;
 };
+
+// True when the region outline the walk is counting has edges but the
+// parser draws nothing for it (finishRegionContour): it needs 3 vertices,
+// or 2 with an arc edge - a round outline, one start and one full circle.
+// Only a G75 arc counts here: a G74 arc may still be drawn straight, which
+// depends on its geometry, and the walk does not judge that. An outline of
+// just its start (a D02 with no D01 after it) has no edges and says nothing,
+// so it is not counted as lost.
+bool outlineDrawsNothing(const GeometryWalk &walk)
+{
+    return walk.regionVertexCount == 2 && !walk.regionHasArcEdge;
+}
 
 enum class PlainVerdict {
     Geometry,   // fully captured in the objects - leave it out of the list
@@ -1016,6 +1032,7 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
     // parser will use.
     QString view = plain;
     if (view.startsWith(QLatin1String("G74")) || view.startsWith(QLatin1String("G75"))) {
+        walk.singleQuadrantArcs = view.at(2) == QLatin1Char('4');
         view = view.mid(3);
     }
     if (view.startsWith(QLatin1String("G54")) || view.startsWith(QLatin1String("G55"))) {
@@ -1038,17 +1055,14 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         }
         walk.insideRegion = true;
         walk.regionStarted = false;
-        walk.regionMovedAfterStart = false;
+        walk.regionMovePending = false;
         walk.regionVertexCount = 0;
+        walk.regionHasArcEdge = false;
         return PlainVerdict::KeepAsText;
     }
     if (plain.startsWith(QLatin1String("G37"))) {
-        // With fewer than 3 vertices the parser emits nothing - unless an arc
-        // edge encloses an area (a full-circle region, the realistic case).
-        // This rule refuses both: for the arc case that costs at most a false
-        // yellow, and it is relaxed only as a separate decision.
-        if (walk.insideRegion && walk.regionStarted && walk.regionVertexCount < 3) {
-            walk.refuseRule = "region with fewer than 3 vertices";
+        if (walk.insideRegion && walk.regionStarted && outlineDrawsNothing(walk)) {
+            walk.refuseRule = "region outline too small to be drawn";
             return PlainVerdict::Refuse;
         }
         walk.insideRegion = false;
@@ -1118,13 +1132,16 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
 
     // The region outline rule. Inside G36..G37 the parser records the
     // destination of the region's first operation as the start vertex and
-    // then one vertex per D01; a later D02 finishes that outline and starts
-    // the next. For the usual outline, and for Altium's, which ends every
-    // region with a D02 that no D01 follows, that is one region object:
-    //     G36 -> D02 (start) -> D01 x N -> D02 -> G37
-    // A D02 is harmless as long as no D01 comes after it. A D01 after it
-    // starts a real second outline - a second region object, which this
-    // walk does not count yet, so it refuses. The first operation must be a D02 with
+    // then one vertex per D01. A later D02 finishes that outline and starts
+    // the next at its own destination (Gerber spec 4.10), and each outline
+    // becomes a region object of its own:
+    //     G36 -> D02 (start) -> D01 x N -> [D02 -> D01 x M ...] -> G37
+    // Every D02 and D01 is then left out as geometry, so each outline must
+    // reach an object: one the parser draws nothing for (see
+    // outlineDrawsNothing) refuses, checked when the next outline starts or
+    // at G37. A D02 that no D01 follows - Altium ends every region with one
+    // - starts an outline with no edges, which draws nothing and says
+    // nothing, so it is harmless. The first operation must be a D02 with
     // coordinates: a D01 there starts from the pen position before G36,
     // which the parser does not record, and a bare "D02*" does not reach
     // the region code at all. A D03 (flash) is not allowed in a region and
@@ -1141,15 +1158,25 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
             }
             walk.regionStarted = true;
             walk.regionVertexCount = 1;
+        } else if (isBare) {
+            // A bare D01/D02 does not reach the region code: no vertex, no
+            // new outline.
         } else if (operation == 2) {
-            walk.regionMovedAfterStart = true;
+            walk.regionMovePending = true;
         } else { // D01
-            if (walk.regionMovedAfterStart) {
-                walk.refuseRule = "second outline in one region (a D01 after a later D02)";
-                return PlainVerdict::Refuse;
+            if (walk.regionMovePending) {
+                // The outline so far is finished: it must reach an object.
+                if (outlineDrawsNothing(walk)) {
+                    walk.refuseRule = "region outline too small to be drawn";
+                    return PlainVerdict::Refuse;
+                }
+                walk.regionMovePending = false;
+                walk.regionVertexCount = 1; // the D02's destination
+                walk.regionHasArcEdge = false;
             }
-            if (!isBare) { // a bare D01 does not reach the region code
-                ++walk.regionVertexCount;
+            ++walk.regionVertexCount;
+            if (walk.arcInterpolation && !walk.singleQuadrantArcs) {
+                walk.regionHasArcEdge = true;
             }
         }
     }

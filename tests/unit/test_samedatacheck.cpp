@@ -126,7 +126,11 @@ private slots:
     void drillLayerColorIsNoise();
 
     // Gerber: geometry only in forms the parser fully reads
-    void secondRegionOutlineIsNeverSameData();
+    void secondRegionOutlineIsSameData();
+    void changedSecondRegionOutlineIsDifferent();
+    void roundRegionOutlinesAfterMovesAreSameData();
+    void tooSmallMiddleRegionOutlineIsNeverSameData();
+    void bareMoveInsideRegionKeepsTheOutline();
     void altiumTrailingRegionMoveIsSameData();
     void unchangedRegionArcIsSameData();
     void changedRegionArcBulgeIsDifferent();
@@ -135,9 +139,10 @@ private slots:
     void coordinateWithApertureCodeIsText();
     void oldStyleCodesAreSameData();
     void regionNotStartedByMoveIsNeverSameData();
-    void repeatedRegionStartMoveIsNeverSameData();
+    void repeatedRegionStartMoveIsCompared();
     void unclosedRegionIsNeverSameData();
-    void regionTooSmallToBeDrawnIsNeverSameData();
+    void roundRegionIsSameData();
+    void singleQuadrantTwoVertexRegionIsNeverSameData();
     void arcWithXButNoYIsText();
     void modeSetWithOnlyArcOffsetsIsText();
     void bareCoordinatesAfterApertureCodeMoveAreText();
@@ -613,13 +618,52 @@ void TestSameDataCheck::unparseableBytesAreNeverSameData()
     QVERIFY(!SameDataCheck::isSameData("same text\n", "same text\n"));
 }
 
-void TestSameDataCheck::secondRegionOutlineIsNeverSameData()
+void TestSameDataCheck::secondRegionOutlineIsSameData()
 {
-    // A real second outline: D02 to a new start, then D01 draws. The parser
-    // drops the second start point, so the region cannot be vouched for.
+    // A second outline: D02 to a new start, then D01 draws. The parser makes
+    // it a region object of its own (Gerber spec 4.10).
     const QString region = "G36*\nX0Y0D02*\nX1000000Y0D01*\nX1000000Y1000000D01*\n"
                            "X2000000Y2000000D02*\nX3000000Y2000000D01*\nX3000000Y3000000D01*\nG37*\n";
-    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+}
+
+void TestSameDataCheck::changedSecondRegionOutlineIsDifferent()
+{
+    const QString region = "G36*\nX0Y0D02*\nX1000000Y0D01*\nX1000000Y1000000D01*\n"
+                           "X%1Y2000000D02*\nX3000000Y2000000D01*\nX3000000Y%2D01*\nG37*\n";
+    const QByteArray a = gerber(kExportA, region.arg("2000000", "3000000"));
+    // Only the start move differs: it is left out as geometry, so the
+    // region's start vertex must carry it.
+    QVERIFY(!SameDataCheck::isSameData(a, gerber(kExportB, region.arg("2500000", "3000000"))));
+    QVERIFY(!SameDataCheck::isSameData(a, gerber(kExportB, region.arg("2000000", "3500000"))));
+}
+
+void TestSameDataCheck::roundRegionOutlinesAfterMovesAreSameData()
+{
+    // The shape of real data: an outline, then round pads in the same
+    // region, each a D02 and one full-circle arc (G75).
+    const QString region = "G75*\nG36*\nX0Y0D02*\nG01X1000000Y0D01*\nX1000000Y1000000D01*\nX0Y0D01*\n"
+                           "X3000000Y0D02*\nG03X3000000Y0I-500000J0D01*\n"
+                           "X5000000Y0D02*\nG03X5000000Y0I-500000J0D01*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
+}
+
+void TestSameDataCheck::tooSmallMiddleRegionOutlineIsNeverSameData()
+{
+    // The first outline is one straight edge: the parser draws nothing for
+    // it, so its left-out D01 would vanish unseen.
+    const QString region = "G36*\nX0Y0D02*\nX%1Y0D01*\n"
+                           "X2000000Y2000000D02*\nX3000000Y2000000D01*\nX3000000Y3000000D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("1000000")),
+                                       gerber(kExportB, region.arg("1000000"))));
+}
+
+void TestSameDataCheck::bareMoveInsideRegionKeepsTheOutline()
+{
+    // A bare "D02*" (no coordinates) never reaches the parser's region code,
+    // so it starts no new outline: the square stays one outline.
+    const QString region = "G36*\nX0Y0D02*\nX1000000Y0D01*\nD02*\nX1000000Y1000000D01*\nX0Y0D01*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
 }
 
 void TestSameDataCheck::altiumTrailingRegionMoveIsSameData()
@@ -697,11 +741,13 @@ void TestSameDataCheck::regionNotStartedByMoveIsNeverSameData()
                                        gerber(kExportB, "D10*\nX0Y0D03*\nX500000Y0D02*\n" + region)));
 }
 
-void TestSameDataCheck::repeatedRegionStartMoveIsNeverSameData()
+void TestSameDataCheck::repeatedRegionStartMoveIsCompared()
 {
-    // Two moves before the first draw: the outline starts at the second one,
-    // but the parser records the first.
+    // Two moves before the first draw: the outline starts at the second one.
+    // The first starts an outline with no edges, which draws nothing.
     const QString region = "G36*\nX0Y0D02*\nX%1Y0D02*\nX1000000Y1000000D01*\nX0Y1000000D01*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region.arg("500000")),
+                                      gerber(kExportB, region.arg("500000"))));
     QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("500000")),
                                        gerber(kExportB, region.arg("600000"))));
 }
@@ -714,13 +760,24 @@ void TestSameDataCheck::unclosedRegionIsNeverSameData()
                                        gerber(kExportB, region.arg("2000000"))));
 }
 
-void TestSameDataCheck::regionTooSmallToBeDrawnIsNeverSameData()
+void TestSameDataCheck::roundRegionIsSameData()
 {
-    // A full-circle region has only two vertices (start and end), so the
-    // parser emits nothing for it - the start move would be lost.
-    const QString region = "D10*\nX0Y0D03*\nG75*\nG36*\nX%1Y0D02*\nG03X0Y0I500000J0D01*\nG37*\n";
-    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("0")),
-                                       gerber(kExportB, region.arg("1000000"))));
+    // A full-circle region has only two vertices (start and end); since
+    // 1.8.8 the parser draws it as a disc.
+    const QString region = "D10*\nX0Y0D03*\nG75*\nG36*\nX%1Y0D02*\nG03X%1Y0I-500000J0D01*\nG37*\n";
+    QVERIFY(SameDataCheck::isSameData(gerber(kExportA, region.arg("1000000")),
+                                      gerber(kExportB, region.arg("1000000"))));
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region.arg("1000000")),
+                                       gerber(kExportB, region.arg("2000000"))));
+}
+
+void TestSameDataCheck::singleQuadrantTwoVertexRegionIsNeverSameData()
+{
+    // In G74 one arc cannot close an outline (equal end points make no
+    // arc), and whether the parser keeps it as an arc depends on its
+    // geometry, which the walk does not judge - so it refuses.
+    const QString region = "D10*\nX0Y0D03*\nG74*\nG36*\nX1000000Y0D02*\nG03X0Y1000000I1000000J0D01*\nG37*\n";
+    QVERIFY(!SameDataCheck::isSameData(gerber(kExportA, region), gerber(kExportB, region)));
 }
 
 void TestSameDataCheck::arcWithXButNoYIsText()

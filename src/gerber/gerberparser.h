@@ -59,8 +59,8 @@ QPainterPath parseContent(const QString &content);
 // the result std::nullopt. So do a %SR in a form the parser misreads, an
 // aperture or macro defined twice, a unit switch after apertures or geometry,
 // and a file cut off mid-statement. So does a region whose outline the parser cannot
-// record exactly (a second outline after a D02, a start that is not a D02
-// move, a flash, an unreadable statement, fewer than 3 vertices, no G37).
+// record exactly (a start that is not a D02 move, a flash, an unreadable
+// statement, an outline too small to be drawn, no G37).
 // The parser ignores or does not read these, and
 // where they sit relative to the objects is not compared, so equal text in
 // both files proves nothing. A file with std::nullopt is never the same
