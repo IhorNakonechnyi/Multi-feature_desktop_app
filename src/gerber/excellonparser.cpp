@@ -517,6 +517,19 @@ std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &conte
             kept << line;
             continue;
         }
+        // ICI (old Excellon header, not in the newer XNC subset): ICI,OFF
+        // means absolute coordinates, which is what the parser reads anyway,
+        // so it changes nothing. ICI,ON - or a bare ICI - makes every hole
+        // an offset from the last one, which the parser does not read (KiCad
+        // reads the switch the same way). Anything else is not a value we
+        // know.
+        if (lineIs(line, "ICI,OFF")) {
+            kept << line;
+            continue;
+        }
+        if (line.startsWith(QLatin1String("ICI"), Qt::CaseInsensitive)) {
+            return refuse("ICI incremental input (only ICI,OFF changes nothing)", line);
+        }
         // A G85 slot: the parser reads only its start point as a hole, so
         // the whole line is compared as text. FMAT (format version) draws
         // nothing.

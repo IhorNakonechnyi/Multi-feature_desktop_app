@@ -170,6 +170,9 @@ private slots:
     void drillInchCommandWithoutUnitLineIsSameData();
     void drillDisagreeingUnitCommandIsNeverSameData();
     void drillUnknownCommandIsNeverSameData();
+    void drillAbsoluteInputSwitchIsSameData();
+    void drillAbsoluteInputSwitchStillSeesAMovedHole();
+    void drillIncrementalInputIsNeverSameData();
     void redefinedDrillToolIsNeverSameData();
 
     // Pair collapse and summary
@@ -966,6 +969,35 @@ void TestSameDataCheck::drillUnknownCommandIsNeverSameData()
     const QString holes = "X1.500Y2.250\nM97\nX3.000Y2.250\n";
     QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, "T01C0.300\n", holes),
                                        drill(kDrillExportB, "T01C0.300\n", holes)));
+}
+
+void TestSameDataCheck::drillAbsoluteInputSwitchIsSameData()
+{
+    // ICI,OFF (old Excellon header): coordinates are absolute - what the
+    // parser reads anyway, so the line changes nothing.
+    for (const QString &line : {"ICI,OFF\n", "ici,off\n"}) {
+        const QString tools = line + "T01C0.300\n";
+        QVERIFY2(SameDataCheck::isSameData(drill(kDrillExportA, tools), drill(kDrillExportB, tools)),
+                 qPrintable(line));
+    }
+}
+
+void TestSameDataCheck::drillAbsoluteInputSwitchStillSeesAMovedHole()
+{
+    const QString tools = "ICI,OFF\nT01C0.300\n";
+    QVERIFY(!SameDataCheck::isSameData(drill(kDrillExportA, tools),
+                                       drill(kDrillExportB, tools, "X1.500Y2.250\nX3.001Y2.250\n")));
+}
+
+void TestSameDataCheck::drillIncrementalInputIsNeverSameData()
+{
+    // ICI,ON - or a bare ICI - makes every hole an offset from the last one,
+    // which the parser does not read.
+    for (const QString &line : {"ICI,ON\n", "ICI\n", "ICI,MAYBE\n"}) {
+        const QString tools = line + "T01C0.300\n";
+        QVERIFY2(!SameDataCheck::isSameData(drill(kDrillExportA, tools), drill(kDrillExportB, tools)),
+                 qPrintable(line));
+    }
 }
 
 void TestSameDataCheck::redefinedDrillToolIsNeverSameData()
