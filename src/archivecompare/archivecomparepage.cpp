@@ -28,6 +28,15 @@
 #ifdef PCB_DIAGNOSTICS
 #include "samedatadiagnosis.h"
 #endif
+#ifdef PCB_TIMING // TIMING-DIAG
+#include <QClipboard>
+#include <QElapsedTimer>
+#include <QFontDatabase>
+#include <QGuiApplication>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QTextDocument>
+#endif
 
 namespace {
 
@@ -244,6 +253,26 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     sameDataLabel_->setVisible(false);
     detailCardLayout->addWidget(sameDataLabel_);
 #endif
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Timing builds only: the stage times as plain text, meant to be copied
+    // out rather than read here, so a small scrolling box is enough and no
+    // other block has to give up space.
+    timingBox_ = new QPlainTextEdit;
+    timingBox_->setReadOnly(true);
+    timingBox_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    timingBox_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    constexpr int kTimingBoxLines = 4;
+    timingBox_->setFixedHeight(kTimingBoxLines * timingBox_->fontMetrics().lineSpacing()
+                               + 2 * timingBox_->frameWidth()
+                               + static_cast<int>(2 * timingBox_->document()->documentMargin()));
+    auto *copyButton = new QPushButton(tr("Copy"));
+    connect(copyButton, &QPushButton::clicked, this,
+            [this] { QGuiApplication::clipboard()->setText(timingBox_->toPlainText()); });
+    auto *timingRow = new QHBoxLayout;
+    timingRow->addWidget(timingBox_, 1);
+    timingRow->addWidget(copyButton, 0, Qt::AlignTop);
+    detailCardLayout->addLayout(timingRow);
+#endif
 
     rightColumn->addWidget(pairsCard);
     rightColumn->addWidget(canvasCard, 1);
@@ -266,7 +295,17 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     connect(gerberPairList_, &QListWidget::currentRowChanged, this,
             [this](int row) { if (row >= 0) showSelectedPair(); });
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownPair);
+#ifdef PCB_TIMING // TIMING-DIAG
+    showTiming(); // starts as all dashes
+#endif
 }
+
+#ifdef PCB_TIMING // TIMING-DIAG
+void ArchiveComparePage::showTiming()
+{
+    timingBox_->setPlainText(StageTiming::formatReport(lastCompare_, lastClick_));
+}
+#endif
 
 void ArchiveComparePage::runComparison()
 {

@@ -8,6 +8,13 @@
 
 #include "../gerber/gerberobjectmodel.h"
 #include "archivecomparisonresult.h"
+#ifdef PCB_TIMING // TIMING-DIAG
+#include <optional>
+
+#include "stagetiming.h"
+
+class QPlainTextEdit;
+#endif
 
 class ArchiveHeader;
 class ArchivePanel;
@@ -79,6 +86,14 @@ private:
     // yellow, and which pairs the same-data check was offered.
     QLabel *sameDataLabel_;
     QSet<QString> offeredPairs_;
+#endif
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Timing builds only (stagetiming.h): the last comparison's and the
+    // last click's stage times, shown as copyable text in timingBox_.
+    void showTiming();
+    QPlainTextEdit *timingBox_;
+    std::optional<StageTiming::CompareTimes> lastCompare_;
+    std::optional<StageTiming::ClickTimes> lastClick_;
 #endif
     CompositeView *gerberCanvas_;
 
