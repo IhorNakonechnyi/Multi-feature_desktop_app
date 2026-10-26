@@ -72,3 +72,10 @@ compile_commands.json
 
 # Confidential real-supplier test archives, local-only (per CLAUDE.md)
 /Test_data/
+
+# Coding-agent local state: settings (which can hold approved shell commands
+# with real names in them), worktrees and review ledgers. Ignored here, not
+# only in personal git config, so a fresh clone on another machine is
+# protected too.
+/.claude/
+/.superpowers/
