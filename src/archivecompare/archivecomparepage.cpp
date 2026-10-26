@@ -317,6 +317,16 @@ void ArchiveComparePage::runComparison()
     // both archives" - so stale coloured rows after a failed re-pick would
     // assert something now false. A successful comparison repopulates them
     // below, so the only visible effect is on the failure paths.
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Reset first, so every early return below leaves dashes, not the
+    // previous run's numbers.
+    QElapsedTimer totalTimer;
+    totalTimer.start();
+    StageTiming::CompareTimes times;
+    lastCompare_.reset();
+    lastClick_.reset();
+    showTiming();
+#endif
     shownLayerA_ = Layer{};
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
@@ -378,8 +388,16 @@ void ArchiveComparePage::runComparison()
     // Before showEntries, so the entries the panels receive already carry
     // their kind. Conclusive extensions cost nothing here; only genuinely
     // ambiguous files are read (Q8).
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.zipMs = outcome.compareMs;
+    QElapsedTimer typesTimer;
+    typesTimer.start();
+#endif
     ComparisonSummary::resolveKinds(outcome.result.entriesA, readHeadA);
     ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.typesMs = typesTimer.elapsed();
+#endif
 
     // A re-exported but unchanged file differs only in its date/user/job
     // lines, so its CRC differs and it arrives here yellow. Parse each
@@ -387,15 +405,46 @@ void ArchiveComparePage::runComparison()
     // green, before anything is shown or counted (samedatacheck.h). Needs
     // whole files, unlike the head-only reads above. Synchronous, like the
     // rest of the compare.
+#ifdef PCB_TIMING // TIMING-DIAG
+    SameDataCheck::collapseSameDataPairs(outcome.result, [this, &times](const DifferingPair &pair) {
+#else
     SameDataCheck::collapseSameDataPairs(outcome.result, [this](const DifferingPair &pair) {
+#endif
 #ifdef PCB_DIAGNOSTICS
         offeredPairs_.insert(pairKey(pair)); // diagnostics: this pair did reach the check
+#endif
+#ifdef PCB_TIMING // TIMING-DIAG
+        ++times.pairsChecked;
+        QElapsedTimer readTimer;
+        readTimer.start();
 #endif
         bool foundA = false;
         bool foundB = false;
         const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
         const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
+#ifdef PCB_TIMING // TIMING-DIAG
+        // Same answer as the plain return below; a failed read is never
+        // parsed, so it adds no parse time or bytes.
+        times.checkReadMs += readTimer.elapsed();
+        if (!foundA || !foundB) {
+            return false;
+        }
+        QElapsedTimer parseTimer;
+        parseTimer.start();
+        const bool same = SameDataCheck::isSameData(bytesA, bytesB);
+        const qint64 parseMs = parseTimer.elapsed();
+        const qint64 pairBytes = bytesA.size() + bytesB.size();
+        times.checkParseMs += parseMs;
+        times.parsedBytes += pairBytes;
+        if (same) {
+            ++times.pairsGreen;
+            times.greenParseMs += parseMs;
+            times.greenBytes += pairBytes;
+        }
+        return same;
+#else
         return foundA && foundB && SameDataCheck::isSameData(bytesA, bytesB);
+#endif
     });
 
     const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
@@ -414,8 +463,15 @@ void ArchiveComparePage::runComparison()
     // Content, not extension, decides which pairs the overlay can draw
     // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
     // design.md). Reuses the same head readers declared above.
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer overlayClassTimer;
+    overlayClassTimer.start();
+#endif
     const GerberDiffTrigger::PairBuckets buckets =
         GerberDiffTrigger::classifyPairs(outcome.result.differingPairs, readHeadA, readHeadB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.overlayClassMs = overlayClassTimer.elapsed();
+#endif
 
     eligiblePairs_ = buckets.drawable;
     gerberPairList_->clear();
@@ -425,6 +481,12 @@ void ArchiveComparePage::runComparison()
     pairStatusLabel_->clear();
 
     updateNotDrawableLabel(buckets.notDrawable.size());
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.totalMs = totalTimer.elapsed();
+    times.memory = StageTiming::readMemoryUse();
+    lastCompare_ = times;
+    showTiming();
+#endif
 }
 
 void ArchiveComparePage::clearSummary()
