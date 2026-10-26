@@ -76,10 +76,12 @@ private:
     QLabel *notDrawableLabel_;
     QLabel *renderTimeLabel_;
     QLabel *compareTimeLabel_;
-    // Diagnostics (1.8.7 test round, samedatadiagnosis.h): why the selected
-    // pair is yellow, and which pairs the same-data check was offered.
+#ifdef PCB_DIAGNOSTICS
+    // Diagnostic builds only (samedatadiagnosis.h): why the selected pair is
+    // yellow, and which pairs the same-data check was offered.
     QLabel *sameDataLabel_;
     QSet<QString> offeredPairs_;
+#endif
     CompositeView *gerberCanvas_;
 
     // The pairs behind gerberPairList_'s rows, same order/index.

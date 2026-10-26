@@ -179,3 +179,31 @@ tags in this repository that are not meant to be published.
 - **Consider `RelWithDebInfo`** instead of `Release` if you want a `.pdb` kept
   locally for diagnosing a crash report. It ships the same runtime and the same
   DLLs; you simply also get symbols. Keep the `.pdb` out of the zip.
+
+---
+
+## Diagnostic build (test rounds only, never a release)
+
+When a pair stays yellow on real files and the reason is unclear, build the
+same source with the same-data diagnostics turned on. The detail card under
+the canvas then says why the selected pair is not green (the refusing rule and
+line, the first differing text line, or how the objects differ), with every
+value reduced to `#`, so the text can be pasted into a conversation. The window
+title reads "Diagnostic build x.y.z", so it is never mistaken for a release.
+
+Follow steps 1-8 unchanged, with three differences:
+
+- Configure with the option on, into **its own** build directory. The option is
+  cached, so switching an existing directory back and forth is easy to get
+  wrong:
+
+  ```powershell
+  cmake -S . -B build-diag "-DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64" "-DPCB_DIAGNOSTICS=ON"
+  ```
+
+- Use `build-diag` in place of `build-release` in steps 2-4.
+- Put `-diag` in the folder and zip name (`PcbSupplierWorkflow-x.y.z-diag-win64`).
+
+The version number stays the release's; the title and the `-diag` name are what
+tell the two builds apart. A normal configure leaves the option off, so a
+release can never pick up the diagnostics by accident.

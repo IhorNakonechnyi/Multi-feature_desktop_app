@@ -194,7 +194,7 @@ private slots:
     void nonLayerPairIsNeverOfferedToTheCheck();
     void summaryCountsSameDataPairAsIdentical();
 
-    // Diagnostics (1.8.7 test round, samedatadiagnosis.h)
+    // Diagnostics (samedatadiagnosis.h; in the app only in a diagnostic build)
     void diagnosisShapesHideEveryValue();
     void diagnosisNamesTheRefusalRule();
     void diagnosisSeesReorderedRegionArcs();

@@ -130,7 +130,7 @@ bool LayerEquivalence::sameObjects(const Layer &a, const Layer &b)
     return sortedRuns(a) == sortedRuns(b);
 }
 
-// Diagnostics only (the 1.8.7 test round): the same keys sameObjects
+// Diagnostics only (SameDataDiagnosis): the same keys sameObjects
 // compares, built the same way as sortedRuns, but each one remembers what
 // kind of object it came from so the difference can be counted per kind.
 QString LayerEquivalence::describeDifference(const Layer &a, const Layer &b)

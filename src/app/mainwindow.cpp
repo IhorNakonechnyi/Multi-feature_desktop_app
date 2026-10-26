@@ -50,11 +50,15 @@ MainWindow::MainWindow(QWidget *parent)
     splitter->setStretchFactor(1, 1); // content: grows
 
     setCentralWidget(splitter);
-    // The 1.8.7 test build carries the same-data diagnostics under the
-    // canvas; the title says so, so it is never mistaken for a release.
-    // Temporary - removed together with the diagnostics. Qt appends the
-    // application name itself: "Diagnostic build 1.8.7 - PCB Gadget".
+#ifdef PCB_DIAGNOSTICS
+    // A diagnostic build (CMake option PCB_DIAGNOSTICS) carries the same-data
+    // diagnostics under the canvas; the title says so, so it is never
+    // mistaken for a release. Qt appends the application name itself:
+    // "Diagnostic build <version> - PCB Gadget".
     setWindowTitle(tr("Diagnostic build %1").arg(QCoreApplication::applicationVersion()));
+#else
+    setWindowTitle(tr("PCB Gadget"));
+#endif
     resize(1100, 700);
 
     connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);

@@ -3,8 +3,8 @@
 #include <QByteArray>
 #include <QString>
 
-// Diagnostics for the 1.8.7 test round: WHY a pair stayed yellow, shown under
-// the overlay canvas. Walks the same steps as SameDataCheck::isSameData and
+// Diagnostics for test rounds on real files: WHY a pair stayed yellow, shown
+// under the overlay canvas. Walks the same steps as SameDataCheck::isSameData and
 // reports where the pair stopped - the rule that refused a file, the first
 // text line that differs, or how the objects differ.
 //
@@ -13,7 +13,9 @@
 // - numbers become '#', names and free text are dropped. Only Gerber /
 // Excellon syntax and counts remain.
 //
-// Temporary: to be removed again before the branch is merged.
+// Built into the app only in a diagnostic build (CMake option PCB_DIAGNOSTICS,
+// see docs/releasing.md). The unit tests always build it, so it keeps working
+// between test rounds.
 namespace SameDataDiagnosis {
 
 // A few lines of text explaining the verdict for this pair, or a single line

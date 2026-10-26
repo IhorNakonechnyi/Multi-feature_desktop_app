@@ -29,7 +29,7 @@ namespace LayerEquivalence {
 // comments - is NOT looked at here; SameDataCheck compares that separately.
 bool sameObjects(const Layer &a, const Layer &b);
 
-// Diagnostics only (1.8.7 test round): for two layers sameObjects calls
+// Diagnostics only (SameDataDiagnosis): for two layers sameObjects calls
 // different, a few lines of counts - objects per kind on each side, polarity
 // runs, and per kind how many objects have no equal partner on the other
 // side. Numbers only, never a coordinate or size.

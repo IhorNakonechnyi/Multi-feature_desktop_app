@@ -26,15 +26,19 @@
 #include "comparisonsummary.h"
 #include "gerberdifftrigger.h"
 #include "samedatacheck.h"
+#ifdef PCB_DIAGNOSTICS
 #include "samedatadiagnosis.h"
+#endif
 
 namespace {
 
+#ifdef PCB_DIAGNOSTICS
 // The key a pair is remembered by in offeredPairs_.
 QString pairKey(const DifferingPair &pair)
 {
     return pair.relativePathA + QLatin1Char('\n') + pair.relativePathB;
 }
+#endif
 
 // A in green, B in red - A and B are symmetric slots (either archive can be
 // loaded on either side), not "new"/"old". MaskCompositor's additive
@@ -239,15 +243,16 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     detailCardLayout->addLayout(secondLine);
     detailCardLayout->addWidget(makeColorLegendRow(kColorOverlap, tr("same")));
 
-    // Diagnostics for the 1.8.7 test round (samedatadiagnosis.h): why the
-    // selected pair stayed yellow. Selectable so it can be copied out.
-    // Temporary - removed again before the branch is merged.
+#ifdef PCB_DIAGNOSTICS
+    // Diagnostic builds only (samedatadiagnosis.h): why the selected pair
+    // stayed yellow. Selectable so it can be copied out.
     sameDataLabel_ = new QLabel;
     sameDataLabel_->setObjectName("detailLabel");
     sameDataLabel_->setWordWrap(true);
     sameDataLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     sameDataLabel_->setVisible(false);
     detailCardLayout->addWidget(sameDataLabel_);
+#endif
 
     rightColumn->addWidget(pairsCard);
     rightColumn->addWidget(canvasCard, 1);
@@ -286,9 +291,11 @@ void ArchiveComparePage::runComparison()
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
     compareTimeLabel_->setText(tr("Compare time: -"));
+#ifdef PCB_DIAGNOSTICS
     sameDataLabel_->clear();
     sameDataLabel_->setVisible(false);
     offeredPairs_.clear();
+#endif
     clearSummary();
     panelA_->showEntries({});
     panelB_->showEntries({});
@@ -354,7 +361,9 @@ void ArchiveComparePage::runComparison()
     QElapsedTimer sameDataTimer;
     sameDataTimer.start();
     SameDataCheck::collapseSameDataPairs(outcome.result, [this](const DifferingPair &pair) {
+#ifdef PCB_DIAGNOSTICS
         offeredPairs_.insert(pairKey(pair)); // diagnostics: this pair did reach the check
+#endif
         bool foundA = false;
         bool foundB = false;
         const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
@@ -539,7 +548,8 @@ void ArchiveComparePage::showSelectedPair()
     const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
     const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
 
-    // Diagnostics (1.8.7 test round): why this pair is not green.
+#ifdef PCB_DIAGNOSTICS
+    // Diagnostic builds only: why this pair is not green.
     if (foundA && foundB) {
         QString diagnosis = SameDataDiagnosis::explain(bytesA, bytesB);
         if (!offeredPairs_.contains(pairKey(pair))) {
@@ -552,6 +562,7 @@ void ArchiveComparePage::showSelectedPair()
         sameDataLabel_->clear();
         sameDataLabel_->setVisible(false);
     }
+#endif
 
     QString parseErrorA;
     QString parseErrorB;
