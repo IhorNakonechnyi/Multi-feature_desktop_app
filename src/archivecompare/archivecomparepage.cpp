@@ -621,10 +621,18 @@ void ArchiveComparePage::showSelectedPair()
     }
     const DifferingPair &pair = eligiblePairs_.at(row);
 
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::ClickTimes clickTimes;
+    QElapsedTimer clickTimer;
+    clickTimer.start();
+#endif
     bool foundA = false;
     bool foundB = false;
     const QByteArray bytesA = ArchiveReader::readEntryBytes(headerA_->archivePath(), pair.relativePathA, &foundA);
     const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    clickTimes.readMs = clickTimer.elapsed();
+#endif
 
 #ifdef PCB_DIAGNOSTICS
     // Diagnostic builds only: why this pair is not green.
@@ -644,8 +652,20 @@ void ArchiveComparePage::showSelectedPair()
 
     QString parseErrorA;
     QString parseErrorB;
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Restarted here, so the PCB_DIAGNOSTICS explain() above is in no timer.
+    clickTimer.restart();
+#endif
     shownLayerA_ = parseGerberOrDrill(bytesA, parseErrorA);
     shownLayerB_ = parseGerberOrDrill(bytesB, parseErrorB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    clickTimes.parseMs = clickTimer.elapsed();
+    // Before fitTo(), so a pair that never renders still shows read/parse;
+    // renderShownPair() fills in the render time.
+    clickTimes.memory = StageTiming::readMemoryUse();
+    lastClick_ = clickTimes;
+    showTiming();
+#endif
 
     // Each side is judged independently: an empty-but-readable file, a read
     // failure, or a parse failure (parseErrorX set) all leave that side's
@@ -702,6 +722,10 @@ void ArchiveComparePage::renderShownPair(const QRectF &windowMm, double pxPerMm)
     // Synchronous on purpose: whether rendering needs a thread of its own is
     // decided by the render time the PCB_TIMING build reports
     // (docs/superpowers/specs/2026-10-26-stage-timing-diagnostic-design.md).
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer renderTimer;
+    renderTimer.start();
+#endif
     QVector<MaskCompositor::TintedMask> layers;
     if (!shownLayerA_.objects.isEmpty()) {
         layers.append({LayerMaskRenderer::render(shownLayerA_, windowMm, pxPerMm), kColorA});
@@ -709,5 +733,17 @@ void ArchiveComparePage::renderShownPair(const QRectF &windowMm, double pxPerMm)
     if (!shownLayerB_.objects.isEmpty()) {
         layers.append({LayerMaskRenderer::render(shownLayerB_, windowMm, pxPerMm), kColorB});
     }
-    gerberCanvas_->setComposite(MaskCompositor::composite(layers), windowMm);
+    const QImage composite = MaskCompositor::composite(layers);
+    gerberCanvas_->setComposite(composite, windowMm);
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Runs again on every zoom, pan and resize: only the render line and
+    // the memory change. The pixel size lets render times from different
+    // canvas sizes be compared.
+    if (lastClick_) {
+        lastClick_->renderMs = renderTimer.elapsed();
+        lastClick_->renderPx = composite.size();
+        lastClick_->memory = StageTiming::readMemoryUse();
+        showTiming();
+    }
+#endif
 }
