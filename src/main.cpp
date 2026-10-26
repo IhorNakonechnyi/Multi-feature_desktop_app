@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName("PcbSupplierWorkflow");
     QApplication::setApplicationName("PcbSupplierWorkflow");
     QApplication::setApplicationDisplayName("PCB Gadget");
-    QApplication::setApplicationVersion(QStringLiteral("1.8.5"));
+    QApplication::setApplicationVersion(QStringLiteral("1.8.8"));
     app.setWindowIcon(QIcon(":/icons/icon.png"));
 
     app.setStyleSheet(themeStylesheet());

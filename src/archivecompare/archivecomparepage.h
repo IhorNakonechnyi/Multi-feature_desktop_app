@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QRectF>
+#include <QSet>
+#include <QString>
 #include <QVector>
 #include <QWidget>
 
@@ -74,6 +76,12 @@ private:
     QLabel *notDrawableLabel_;
     QLabel *renderTimeLabel_;
     QLabel *compareTimeLabel_;
+#ifdef PCB_DIAGNOSTICS
+    // Diagnostic builds only (samedatadiagnosis.h): why the selected pair is
+    // yellow, and which pairs the same-data check was offered.
+    QLabel *sameDataLabel_;
+    QSet<QString> offeredPairs_;
+#endif
     CompositeView *gerberCanvas_;
 
     // The pairs behind gerberPairList_'s rows, same order/index.

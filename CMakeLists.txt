@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PcbSupplierWorkflow VERSION 1.8.5 LANGUAGES CXX)
+project(PcbSupplierWorkflow VERSION 1.8.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,6 +98,12 @@ add_executable(PcbSupplierWorkflow WIN32
     src/archivecompare/archivepanel.cpp
     src/archivecompare/gerberdifftrigger.h
     src/archivecompare/gerberdifftrigger.cpp
+    src/archivecompare/samedatacheck.h
+    src/archivecompare/samedatacheck.cpp
+    src/gerber/samedatarefusal.h
+    src/gerber/exportnoise.h
+    src/gerber/layerequivalence.h
+    src/gerber/layerequivalence.cpp
     src/gerber/gerberfiletype.h
     src/gerber/gerberfiletype.cpp
     src/gerber/gerberdiffrenderer.h
@@ -129,6 +135,19 @@ add_executable(PcbSupplierWorkflow WIN32
 )
 
 target_include_directories(PcbSupplierWorkflow PRIVATE src)
+
+# A diagnostic build shows, under the overlay canvas, why the selected pair
+# stayed yellow (src/archivecompare/samedatadiagnosis.h), and says so in the
+# window title. For test rounds on real files only; release builds leave it
+# off. The option is cached, so configure a diagnostic build into its own
+# build directory rather than switching an existing one.
+option(PCB_DIAGNOSTICS "Show the same-data diagnostics under the canvas" OFF)
+if(PCB_DIAGNOSTICS)
+    target_sources(PcbSupplierWorkflow PRIVATE
+        src/archivecompare/samedatadiagnosis.h
+        src/archivecompare/samedatadiagnosis.cpp)
+    target_compile_definitions(PcbSupplierWorkflow PRIVATE PCB_DIAGNOSTICS)
+endif()
 
 target_link_libraries(PcbSupplierWorkflow PRIVATE
     Qt6::Core

@@ -118,6 +118,37 @@ QPainterPath resolveLinearStrokePath(const GerberAperture &aperture, const QPoin
     return transform.map(stroke);
 }
 
+// Adds to `path` (whose current point is `from`) the circular arc from
+// `from` to `to` around `center`, as a TRUE curve (QPainterPath::arcTo,
+// exact-to-subpixel bezier segments), in the commanded direction. Equal
+// end points mean a full circle (G75 semantics). Used for arc strokes and
+// for the arc edges of a region.
+void appendArc(QPainterPath &path, const QPointF &from, const QPointF &to, const QPointF &center,
+               bool counterClockwise)
+{
+    const double startAngle = std::atan2(from.y() - center.y(), from.x() - center.x());
+    double endAngle = std::atan2(to.y() - center.y(), to.x() - center.x());
+    const double radius = std::hypot(from.x() - center.x(), from.y() - center.y());
+
+    if (from == to) {
+        endAngle = startAngle + (counterClockwise ? 2.0 : -2.0) * std::numbers::pi;
+    } else if (counterClockwise && endAngle < startAngle) {
+        endAngle += 2.0 * std::numbers::pi;
+    } else if (!counterClockwise && endAngle > startAngle) {
+        endAngle -= 2.0 * std::numbers::pi;
+    }
+
+    // Angle-sign note: our coordinates are Gerber-native Y-up, where
+    // atan2 gives the mathematical angle (CCW positive). arcTo's angle
+    // convention is defined for Qt's Y-DOWN screen space - its point at
+    // angle t is (cx + r*cos t, cy - r*sin t). Negating both the start
+    // angle and the sweep maps one convention onto the other exactly
+    // (cos(-t) = cos t, -sin(-t) = sin t), so the drawn curve follows
+    // our mathematical arc without this file ever leaving Y-up space.
+    const QRectF circle(center.x() - radius, center.y() - radius, 2.0 * radius, 2.0 * radius);
+    path.arcTo(circle, -qRadiansToDegrees(startAngle), -qRadiansToDegrees(endAngle - startAngle));
+}
+
 // Draws a circular arc stroke following the TRUE curve (QPainterPath::
 // arcTo, which represents the circle as exact-to-subpixel bezier
 // segments) - not a chord polyline. The predecessor of this function
@@ -130,9 +161,6 @@ QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF 
                                   const QPointF &center, bool counterClockwise)
 {
     const double width = aperture.modifiers.value(0, 0.1);
-
-    const double startAngle = std::atan2(from.y() - center.y(), from.x() - center.x());
-    double endAngle = std::atan2(to.y() - center.y(), to.x() - center.x());
     const double radius = std::hypot(from.x() - center.x(), from.y() - center.y());
 
     // Coinciding endpoints mean a full 360-degree circle (G75 multi-
@@ -148,23 +176,9 @@ QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF 
         return fullCircleStroker.createStroke(ring);
     }
 
-    if (counterClockwise && endAngle < startAngle) {
-        endAngle += 2.0 * std::numbers::pi;
-    } else if (!counterClockwise && endAngle > startAngle) {
-        endAngle -= 2.0 * std::numbers::pi;
-    }
-
-    // Angle-sign note: our coordinates are Gerber-native Y-up, where
-    // atan2 gives the mathematical angle (CCW positive). arcTo's angle
-    // convention is defined for Qt's Y-DOWN screen space - its point at
-    // angle t is (cx + r*cos t, cy - r*sin t). Negating both the start
-    // angle and the sweep maps one convention onto the other exactly
-    // (cos(-t) = cos t, -sin(-t) = sin t), so the drawn curve follows
-    // our mathematical arc without this file ever leaving Y-up space.
-    const QRectF circle(center.x() - radius, center.y() - radius, 2.0 * radius, 2.0 * radius);
     QPainterPath centerline;
     centerline.moveTo(from);
-    centerline.arcTo(circle, -qRadiansToDegrees(startAngle), -qRadiansToDegrees(endAngle - startAngle));
+    appendArc(centerline, from, to, center, counterClockwise);
 
     QPainterPathStroker stroker;
     stroker.setWidth(width);
@@ -179,18 +193,29 @@ QPainterPath resolveArcStrokePath(const GerberAperture &aperture, const QPointF 
     return stroker.createStroke(centerline);
 }
 
-// Same closed polygon the parser's old G37 block built: the collected
-// contour vertices, closed. The parser only emits a Region object when
-// it has at least 3 vertices, so no empty-region check is needed here.
-QPainterPath resolveRegionPath(const QVector<PointNm> &regionPoints)
+// The region's closed outline: from vertex to vertex, along a straight
+// edge or an arc (see GraphicObject::regionEdges), then closed back to the
+// start. The parser only emits a Region object that can enclose an area,
+// so no empty-region check is needed here.
+QPainterPath resolveRegionPath(const QVector<PointNm> &regionPoints, const QVector<RegionEdge> &regionEdges)
 {
-    QPolygonF polygon;
-    polygon.reserve(regionPoints.size());
-    for (const PointNm &vertex : regionPoints) {
-        polygon << toMm(vertex);
-    }
     QPainterPath region;
-    region.addPolygon(polygon);
+    if (regionPoints.isEmpty()) {
+        return region;
+    }
+    region.moveTo(toMm(regionPoints.first()));
+    for (int i = 1; i < regionPoints.size(); ++i) {
+        const QPointF from = toMm(regionPoints.at(i - 1));
+        const QPointF to = toMm(regionPoints.at(i));
+        if (i < regionEdges.size() && regionEdges.at(i).isArc) {
+            appendArc(region, from, to, toMm(regionEdges.at(i).arcCenter), regionEdges.at(i).arcCounterClockwise);
+        }
+        // The straight edge - or, after an arc, a snap onto the vertex: the
+        // file's end point can sit a hair off the circle the arc was drawn
+        // on (its radius comes from the start point), and the next edge
+        // must start where the file says.
+        region.lineTo(to);
+    }
     region.closeSubpath();
     return region;
 }
@@ -211,7 +236,7 @@ QPainterPath GerberObjectPaths::objectPathMm(const GraphicObject &object, const 
         return resolveLinearStrokePath(layer.apertures.value(object.apertureCode), toMm(object.position),
                                        toMm(object.strokeTo));
     case ObjectType::Region:
-        return resolveRegionPath(object.regionPoints);
+        return resolveRegionPath(object.regionPoints, object.regionEdges);
     }
     return QPainterPath(); // unreachable - all ObjectType values handled above
 }

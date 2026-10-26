@@ -27,8 +27,8 @@ IDI_MAIN_ICON ICON "icons/icon.ico"
 //   FILEOS        0x40004 = VOS_NT_WINDOWS32
 //   FILETYPE      0x1     = VFT_APP
 1 VERSIONINFO
-FILEVERSION 1,8,5,0
-PRODUCTVERSION 1,8,5,0
+FILEVERSION 1,8,8,0
+PRODUCTVERSION 1,8,8,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -42,12 +42,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Ihor Nakonechnyi"
             VALUE "FileDescription",  "PCB Gadget - compares two archives of PCB manufacturing data"
-            VALUE "FileVersion",      "1.8.5.0"
+            VALUE "FileVersion",      "1.8.8.0"
             VALUE "InternalName",     "PcbSupplierWorkflow"
             VALUE "LegalCopyright",   "Copyright (C) 2026 Ihor Nakonechnyi. MIT licensed."
             VALUE "OriginalFilename", "PcbSupplierWorkflow.exe"
             VALUE "ProductName",      "PCB Gadget"
-            VALUE "ProductVersion",   "1.8.5.0"
+            VALUE "ProductVersion",   "1.8.8.0"
         END
     END
     BLOCK "VarFileInfo"

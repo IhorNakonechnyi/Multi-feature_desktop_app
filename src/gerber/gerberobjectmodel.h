@@ -36,6 +36,16 @@ enum class Polarity { Dark, Clear };
 
 enum class ObjectType { Flash, Stroke, Region };
 
+// How a region outline reaches one of its vertices from the vertex before
+// it: a straight edge, or an arc around an absolute center (already
+// resolved from the file's I/J offsets, G74 signs included). The center
+// means nothing for a straight edge and is left at (0,0).
+struct RegionEdge {
+    bool isArc = false;
+    PointNm arcCenter;
+    bool arcCounterClockwise = false;
+};
+
 // One drawn shape from a Gerber file. Fields are tagged by which
 // ObjectType actually uses them - one flat struct rather than a
 // std::variant-of-three-substructs, matching this codebase's existing
@@ -67,6 +77,13 @@ struct GraphicObject {
     // opening move's destination, not auto-closed - closing is the
     // flatten stage's job, same as today's G37 handling).
     QVector<PointNm> regionPoints;
+    // Region only, one entry per regionPoints entry: regionEdges[i] is the
+    // edge that ENDS at regionPoints[i]. Entry 0 (the start) has no edge
+    // and stays straight. The closing edge back to the start is straight;
+    // a file that closes with an arc ends on the start point, so that arc
+    // is the last entry. Shorter than regionPoints (an object built by
+    // hand) means the missing edges are straight.
+    QVector<RegionEdge> regionEdges;
 };
 
 // One Gerber file's full parsed content, before any geometry

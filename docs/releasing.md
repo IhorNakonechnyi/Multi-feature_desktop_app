@@ -12,9 +12,10 @@ Total time: roughly 10-15 minutes, almost all of it the build.
 
 - **Close the app if it is running.** The link step fails with `LNK1168`
   otherwise, because the running process holds a lock on the executable.
-- Decide the version number and make sure it matches in **two** places:
+- Decide the version number and make sure it matches in **three** places:
   `project(... VERSION x.y.z)` in `CMakeLists.txt`, and `FILEVERSION` /
-  `PRODUCTVERSION` / the two version strings in `resources/app.rc`. They are
+  `PRODUCTVERSION` / the two version strings in `resources/app.rc`, and
+  `setApplicationVersion` in `src/main.cpp`. They are
   duplicated by hand; nothing checks that they agree.
 
 ## 1. Configure into a clean directory
@@ -58,13 +59,13 @@ a glance.
 The `PATH` line is mandatory too — without it every test exits `0xc0000135`,
 which is a DLL-not-found error, not a broken test.
 
-Expect **18/18 passed**. One of them, `test_nonetworkdependency`, inspects the
+Expect **19/19 passed**. One of them, `test_nonetworkdependency`, inspects the
 built executable rather than any source file; see step 5 for why that matters.
 
 ## 4. Assemble a clean package folder
 
 ```powershell
-$dist = "build-dist\PcbSupplierWorkflow-1.8.5-win64"
+$dist = "build-dist\PcbSupplierWorkflow-1.8.8-win64"
 Remove-Item build-dist -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 Copy-Item build-release\Release\PcbSupplierWorkflow.exe $dist
@@ -146,8 +147,8 @@ theme is dark, and a real comparison of two archives works end to end.
 ## 8. Zip and hash
 
 ```powershell
-Compress-Archive -Path $dist -DestinationPath "build-dist\PcbSupplierWorkflow-1.8.5-win64.zip" -Force
-Get-FileHash "build-dist\PcbSupplierWorkflow-1.8.5-win64.zip" -Algorithm SHA256
+Compress-Archive -Path $dist -DestinationPath "build-dist\PcbSupplierWorkflow-1.8.8-win64.zip" -Force
+Get-FileHash "build-dist\PcbSupplierWorkflow-1.8.8-win64.zip" -Algorithm SHA256
 ```
 
 Record the hash. Send it to recipients **in the message body**, separately from
@@ -160,7 +161,7 @@ share the link, and include the SHA-256 and a note that the executable is not
 code-signed so Windows SmartScreen will warn on first run.
 
 If you are tagging the release in git, tag by name rather than pushing all
-tags — `git push origin v1.8.5`, not `git push --tags`. There are local-only
+tags — `git push origin v1.8.8`, not `git push --tags`. There are local-only
 tags in this repository that are not meant to be published.
 
 ---
@@ -178,3 +179,31 @@ tags in this repository that are not meant to be published.
 - **Consider `RelWithDebInfo`** instead of `Release` if you want a `.pdb` kept
   locally for diagnosing a crash report. It ships the same runtime and the same
   DLLs; you simply also get symbols. Keep the `.pdb` out of the zip.
+
+---
+
+## Diagnostic build (test rounds only, never a release)
+
+When a pair stays yellow on real files and the reason is unclear, build the
+same source with the same-data diagnostics turned on. The detail card under
+the canvas then says why the selected pair is not green (the refusing rule and
+line, the first differing text line, or how the objects differ), with every
+value reduced to `#`, so the text can be pasted into a conversation. The window
+title reads "Diagnostic build x.y.z", so it is never mistaken for a release.
+
+Follow steps 1-8 unchanged, with three differences:
+
+- Configure with the option on, into **its own** build directory. The option is
+  cached, so switching an existing directory back and forth is easy to get
+  wrong:
+
+  ```powershell
+  cmake -S . -B build-diag "-DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/msvc2022_64" "-DPCB_DIAGNOSTICS=ON"
+  ```
+
+- Use `build-diag` in place of `build-release` in steps 2-4.
+- Put `-diag` in the folder and zip name (`PcbSupplierWorkflow-x.y.z-diag-win64`).
+
+The version number stays the release's; the title and the `-diag` name are what
+tell the two builds apart. A normal configure leaves the option off, so a
+release can never pick up the diagnostics by accident.

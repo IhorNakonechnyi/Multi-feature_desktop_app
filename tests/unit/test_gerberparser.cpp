@@ -46,6 +46,24 @@ private slots:
     void operationCodeIsModalOnBareCoordinates();
     void multiQuadrantArcWithEqualEndpointsIsAFullCircle();
     void singleQuadrantArcResolvesUnsignedCenterOffsets();
+    void macroBodyStopsAtApertureAttribute();
+    void macroClosedOnItsOwnLineKeepsItsPrimitive();
+    void arcWithOnlyXKeepsItsX();
+    void regionArcWithOnlyXKeepsItsX();
+    void regionArcEdgeIsKept();
+    void regionArcIsDrawnAsACurve();
+    void singleQuadrantRegionArcResolvesItsCenter();
+    void singleQuadrantCornerJustPastAQuarterTurnKeepsItsCenter();
+    void singleQuadrantClockwiseArcJustPastAQuarterTurnKeepsItsCenter();
+    void singleQuadrantArcTakesTheShortWayRound();
+    void singleQuadrantArcWithEqualEndsIsNotARing();
+    void singleQuadrantArcWithNoShortWayRoundIsStraight();
+    void fullCircleRegionIsEmitted();
+    void stepAndRepeatMovesRegionArcCenters();
+    void secondContourInARegionIsItsOwnRegion();
+    void roundContourAfterAMoveIsADisc();
+    void singleQuadrantContourAfterAMoveKeepsItsArcs();
+    void trailingMoveBeforeRegionEndAddsNoRegion();
 };
 
 void TestGerberParser::parsesSingleFlashWithStandardCircleAperture()
@@ -886,6 +904,400 @@ void TestGerberParser::singleQuadrantArcResolvesUnsignedCenterOffsets()
     QVERIFY(arc.isArc);
     QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
     QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::macroBodyStopsAtApertureAttribute()
+{
+    const QString content = "%FSLAX46Y46*%\n%MOMM*%\n"
+                            "%AMBOX*\n21,1,$1,$2,0,0,0*%\n"
+                            "%TA.AperFunction,SMDPad*%\n"
+                            "%ADD10BOX,1X2*%\n"
+                            "D10*\nX0Y0D03*\nM02*\n";
+    const Layer layer = GerberParser::parseContentToObjects(content);
+    QVERIFY(layer.macros.contains("BOX"));
+    QCOMPARE(layer.macros.value("BOX").statements, QStringList({"21,1,$1,$2,0,0,0"}));
+}
+
+void TestGerberParser::macroClosedOnItsOwnLineKeepsItsPrimitive()
+{
+    // The closing '%' on its own line leaves an empty statement after the
+    // last '*'. It ends the macro body but adds nothing to it.
+    const QString content = "%FSLAX46Y46*%\n%MOMM*%\n"
+                            "%AMOC8*\n5,1,8,0,0,1.08239X$1,22.5*\n%\n"
+                            "%ADD10OC8,0.5*%\n"
+                            "D10*\nX0Y0D03*\nM02*\n";
+    const Layer layer = GerberParser::parseContentToObjects(content);
+    QVERIFY(layer.macros.contains("OC8"));
+    QCOMPARE(layer.macros.value("OC8").statements, QStringList({"5,1,8,0,0,1.08239X$1,22.5"}));
+    QCOMPARE(layer.objects.size(), 1);
+}
+
+void TestGerberParser::arcWithOnlyXKeepsItsX()
+{
+    // "X..I..J..D01" with no Y: X must stop at the I, not swallow the
+    // offsets (which made it unreadable, so it silently became 0). Half
+    // circle from (5,0) to (-5,0) about the origin.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.1*%\n"
+        "D10*\n"
+        "G75*\n"
+        "X050000Y000000D02*\n"
+        "G03X-050000I-050000J000000D01*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).strokeTo.x, GerberFormat::mmToNm(-5.0));
+    QCOMPARE(layer.objects.at(0).strokeTo.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::regionArcWithOnlyXKeepsItsX()
+{
+    // The same form as a region edge - a corner read as X=0 twists the
+    // outline. Square (1,1)-(5,5) whose top edge is an arc to (1,5).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G75*\n"
+        "G36*\n"
+        "X010000Y010000D02*\n"
+        "G01X050000Y010000D01*\n"
+        "X050000Y050000D01*\n"
+        "G03X010000I-020000J000000D01*\n"
+        "G01X010000Y010000D01*\n"
+        "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const QVector<PointNm> &points = layer.objects.at(0).regionPoints;
+    QCOMPARE(points.size(), 5);
+    QCOMPARE(points.at(3).x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(points.at(3).y, GerberFormat::mmToNm(5.0));
+}
+
+namespace {
+
+// Square (1,1)-(5,5) whose top edge is a CCW half circle from (5,5) to
+// (1,5) about (3,5), bulging up to y=7. `steps` goes before the region
+// (e.g. a %SR block start).
+QString squareWithArcTop(const QString &before = QString(), const QString &after = QString())
+{
+    return "%FSLAX24Y24*%\n"
+           "%MOMM*%\n"
+           "G75*\n"
+        + before
+        + "G36*\n"
+          "X010000Y010000D02*\n"
+          "G01X050000Y010000D01*\n"
+          "X050000Y050000D01*\n"
+          "G03X010000Y050000I-020000J000000D01*\n"
+          "G01X010000Y010000D01*\n"
+          "G37*\n"
+        + after;
+}
+
+} // namespace
+
+void TestGerberParser::regionArcEdgeIsKept()
+{
+    // Each region vertex records how the outline reaches it: the arc edge
+    // keeps its absolute center and direction, the straight ones do not.
+    const Layer layer = GerberParser::parseContentToObjects(squareWithArcTop());
+
+    QCOMPARE(layer.objects.size(), 1);
+    const GraphicObject &region = layer.objects.at(0);
+    QCOMPARE(region.regionEdges.size(), region.regionPoints.size());
+    for (int i = 0; i < region.regionEdges.size(); ++i) {
+        QCOMPARE(region.regionEdges.at(i).isArc, i == 3);
+    }
+    QCOMPARE(region.regionEdges.at(3).arcCenter.x, GerberFormat::mmToNm(3.0));
+    QCOMPARE(region.regionEdges.at(3).arcCenter.y, GerberFormat::mmToNm(5.0));
+    QVERIFY(region.regionEdges.at(3).arcCounterClockwise);
+}
+
+void TestGerberParser::regionArcIsDrawnAsACurve()
+{
+    // (3,6.5) lies under the bulge: inside the curved outline, outside the
+    // straight chord the arc used to be reduced to. (3,7.2) is above it.
+    const QPainterPath path = GerberParser::parseContent(squareWithArcTop());
+    QVERIFY(path.contains(QPointF(3.0, 6.5)));
+    QVERIFY(path.contains(QPointF(3.0, 3.0)));
+    QVERIFY(!path.contains(QPointF(3.0, 7.2)));
+}
+
+void TestGerberParser::singleQuadrantRegionArcResolvesItsCenter()
+{
+    // G74: a quarter disc, the arc from (2,0) to (0,2) written with the
+    // unsigned offset I2. The center must resolve to (0,0), not (4,0).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G74*\n"
+        "G36*\n"
+        "X000000Y000000D02*\n"
+        "G01X020000Y000000D01*\n"
+        "G03X000000Y020000I020000J000000D01*\n"
+        "G01X000000Y000000D01*\n"
+        "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    const RegionEdge &arc = layer.objects.at(0).regionEdges.at(2);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
+    // Inside the quarter disc, beyond the chord from (2,0) to (0,2).
+    QVERIFY(GerberParser::parseContent(content).contains(QPointF(1.2, 1.2)));
+}
+
+void TestGerberParser::singleQuadrantCornerJustPastAQuarterTurnKeepsItsCenter()
+{
+    // A rounded corner whose end point the file rounded a hair past the
+    // quarter turn: (2,0) to (-0.001,2) around (0,0) is 90.03 degrees. A
+    // strict 90-degree limit rejected every sign choice and fell back to
+    // the unsigned offset, putting the center at (4,0) and drawing a near-
+    // full loop that reaches out to x = 6.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G74*\n"
+        "G36*\n"
+        "X000000Y000000D02*\n"
+        "G01X020000Y000000D01*\n"
+        "G03X-000010Y020000I020000J000000D01*\n"
+        "G01X000000Y000000D01*\n"
+        "G37*\n";
+
+    const RegionEdge arc = GerberParser::parseContentToObjects(content).objects.at(0).regionEdges.at(2);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(0.0));
+    const QPainterPath path = GerberParser::parseContent(content);
+    QVERIFY(path.contains(QPointF(1.2, 1.2)));
+    QVERIFY(path.boundingRect().right() < 2.1);
+}
+
+void TestGerberParser::singleQuadrantClockwiseArcJustPastAQuarterTurnKeepsItsCenter()
+{
+    // The same rounding, clockwise, on an arc stroke: (0,2) to (2,-0.001)
+    // around (0,0). The wrong center would be (0,4).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X000000Y020000D2*\n"
+        "G02X020000Y-000010I000000J020000D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QVERIFY(layer.objects.at(0).isArc);
+    QCOMPARE(layer.objects.at(0).arcCenter.x, GerberFormat::mmToNm(0.0));
+    QCOMPARE(layer.objects.at(0).arcCenter.y, GerberFormat::mmToNm(0.0));
+}
+
+void TestGerberParser::singleQuadrantArcTakesTheShortWayRound()
+{
+    // From (0,0) to (2,0) with offsets 1,1: both (1,1) and (1,-1) are 1.41
+    // from either end, so the distances cannot choose. Counterclockwise,
+    // (1,1) gives a 90-degree arc and (1,-1) a 270-degree one - G74 means
+    // the short one.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X000000Y000000D2*\n"
+        "G03X020000Y000000I010000J010000D1*\n"
+        "M02*\n";
+
+    const GraphicObject arc = GerberParser::parseContentToObjects(content).objects.at(0);
+    QVERIFY(arc.isArc);
+    QCOMPARE(arc.arcCenter.x, GerberFormat::mmToNm(1.0));
+    QCOMPARE(arc.arcCenter.y, GerberFormat::mmToNm(1.0));
+}
+
+void TestGerberParser::singleQuadrantArcWithEqualEndsIsNotARing()
+{
+    // Equal end points make a full circle only in G75. A G74 arc spans at
+    // most a quarter turn, so this draws nothing more than a straight
+    // stroke of zero length would.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "%ADD10C,0.2*%\n"
+        "D10*\n"
+        "G74*\n"
+        "X010000Y000000D2*\n"
+        "G03X010000Y000000I010000J000000D1*\n"
+        "M02*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).type, ObjectType::Stroke);
+    QVERIFY(!layer.objects.at(0).isArc);
+}
+
+void TestGerberParser::singleQuadrantArcWithNoShortWayRoundIsStraight()
+{
+    // Zero offsets put the center on the start point: from (2,0) to (2,-1)
+    // counterclockwise that is a 270-degree turn, and no sign choice
+    // changes it. No G74 arc turns that far, so the edge is drawn straight.
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G74*\n"
+        "G36*\n"
+        "X000000Y000000D02*\n"
+        "G01X020000Y000000D01*\n"
+        "G03X020000Y-010000I000000J000000D01*\n"
+        "G01X000000Y000000D01*\n"
+        "G37*\n";
+
+    const GraphicObject region = GerberParser::parseContentToObjects(content).objects.at(0);
+    QVERIFY(!region.regionEdges.at(2).isArc);
+    QCOMPARE(region.regionEdges.at(2).arcCenter.x, 0);
+}
+
+void TestGerberParser::fullCircleRegionIsEmitted()
+{
+    // A round region: one D02 start, one full-circle arc back to it. Only
+    // two vertices, but the arc encloses a disc of radius 2 about (0,0).
+    const QString content =
+        "%FSLAX24Y24*%\n"
+        "%MOMM*%\n"
+        "G75*\n"
+        "G36*\n"
+        "X020000Y000000D02*\n"
+        "G03X020000Y000000I-020000J000000D01*\n"
+        "G37*\n";
+
+    QCOMPARE(GerberParser::parseContentToObjects(content).objects.size(), 1);
+    const QPainterPath path = GerberParser::parseContent(content);
+    QVERIFY(path.contains(QPointF(0.0, 0.0)));
+    QVERIFY(path.contains(QPointF(-1.5, 0.0)));
+    QVERIFY(!path.contains(QPointF(2.5, 0.0)));
+}
+
+void TestGerberParser::stepAndRepeatMovesRegionArcCenters()
+{
+    // Two copies, 10 mm apart in X: the copy's arc center moves with it.
+    const Layer layer = GerberParser::parseContentToObjects(
+        squareWithArcTop("%SRX2Y1I10J0*%\n", "%SR*%\n"));
+
+    QCOMPARE(layer.objects.size(), 2);
+    QCOMPARE(layer.objects.at(1).regionEdges.at(3).arcCenter.x, GerberFormat::mmToNm(13.0));
+    QCOMPARE(layer.objects.at(1).regionEdges.at(3).arcCenter.y, GerberFormat::mmToNm(5.0));
+    // A straight edge has no center to move.
+    QCOMPARE(layer.objects.at(1).regionEdges.at(1).arcCenter.x, 0);
+}
+
+namespace {
+
+// A 2 mm square from (0,0), closed, inside an open G36 - the caller adds
+// the rest of the region and the G37.
+const char *const kSquareContour =
+    "%FSLAX24Y24*%\n"
+    "%MOMM*%\n"
+    "G36*\n"
+    "X000000Y000000D02*\n"
+    "G01X020000Y000000D01*\n"
+    "X020000Y020000D01*\n"
+    "X000000Y020000D01*\n"
+    "X000000Y000000D01*\n";
+
+} // namespace
+
+void TestGerberParser::secondContourInARegionIsItsOwnRegion()
+{
+    // A D02 inside G36..G37 finishes the contour and starts a new one, and
+    // each contour is filled on its own (Gerber spec 4.10). The parser used
+    // to drop the D02 and join the second square onto the first.
+    const QString content = QString(kSquareContour)
+        + "X050000Y050000D02*\n"
+          "X070000Y050000D01*\n"
+          "X070000Y070000D01*\n"
+          "X050000Y070000D01*\n"
+          "X050000Y050000D01*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    QCOMPARE(layer.objects.at(0).regionPoints.size(), 5);
+    QCOMPARE(layer.objects.at(1).regionPoints.size(), 5);
+    QCOMPARE(layer.objects.at(1).regionPoints.at(0).x, GerberFormat::mmToNm(5.0));
+    QCOMPARE(layer.objects.at(1).regionPoints.at(0).y, GerberFormat::mmToNm(5.0));
+}
+
+void TestGerberParser::roundContourAfterAMoveIsADisc()
+{
+    // After the square, a D02 to (7,0) and one full circle around (6,0).
+    // Joined onto the square, that arc started at (0,0): radius 6, a huge
+    // loop instead of a 1 mm disc.
+    const QString content = QString(kSquareContour)
+        + "G75*\n"
+          "X070000Y000000D02*\n"
+          "G03X070000Y000000I-010000J000000D01*\n"
+          "G37*\n";
+
+    QCOMPARE(GerberParser::parseContentToObjects(content).objects.size(), 2);
+    const QPainterPath path = GerberParser::parseContent(content);
+    QVERIFY(path.contains(QPointF(6.0, 0.0)));
+    QVERIFY(path.contains(QPointF(1.0, 1.0)));
+    const QRectF bounds = path.boundingRect();
+    QVERIFY(bounds.left() > -0.01 && bounds.right() < 7.01);
+    QVERIFY(bounds.top() > -1.01 && bounds.bottom() < 2.01);
+}
+
+void TestGerberParser::singleQuadrantContourAfterAMoveKeepsItsArcs()
+{
+    // The same disc in G74: four quarter arcs, unsigned offsets.
+    const QString content = QString(kSquareContour)
+        + "G74*\n"
+          "X070000Y000000D02*\n"
+          "G03X060000Y010000I010000J000000D01*\n"
+          "X050000Y000000I000000J010000D01*\n"
+          "X060000Y-010000I010000J000000D01*\n"
+          "X070000Y000000I000000J010000D01*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 2);
+    const GraphicObject &disc = layer.objects.at(1);
+    QCOMPARE(disc.regionPoints.size(), 5);
+    for (int i = 1; i < disc.regionEdges.size(); ++i) {
+        QVERIFY(disc.regionEdges.at(i).isArc);
+        QCOMPARE(disc.regionEdges.at(i).arcCenter.x, GerberFormat::mmToNm(6.0));
+        QCOMPARE(disc.regionEdges.at(i).arcCenter.y, GerberFormat::mmToNm(0.0));
+    }
+    const QRectF bounds = GerberParser::parseContent(content).boundingRect();
+    QVERIFY(bounds.right() < 7.01 && bounds.top() > -1.01);
+}
+
+void TestGerberParser::trailingMoveBeforeRegionEndAddsNoRegion()
+{
+    // A D02 that no D01 follows starts a contour with no edges: nothing to
+    // fill, so the region is still the one square. The same-data check
+    // relies on this when it leaves such a D02 out.
+    const QString content = QString(kSquareContour)
+        + "X090000Y090000D02*\n"
+          "G37*\n";
+
+    const Layer layer = GerberParser::parseContentToObjects(content);
+
+    QCOMPARE(layer.objects.size(), 1);
+    QCOMPARE(layer.objects.at(0).regionPoints.size(), 5);
 }
 
 QTEST_MAIN(TestGerberParser)

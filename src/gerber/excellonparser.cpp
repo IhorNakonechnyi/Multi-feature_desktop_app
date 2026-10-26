@@ -1,11 +1,15 @@
 #include "excellonparser.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <QHash>
 #include <QObject>
+#include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 
+#include "exportnoise.h"
 #include "gerberaperture.h"
 #include "gerberformat.h"
 
@@ -339,4 +343,201 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     layer.objects = std::move(state.objects);
     layer.unitScale = state.format.unitsAreInches ? 25.4 : 1.0;
     return layer;
+}
+
+std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal,
+                                                            bool *drawLeftOut)
+{
+    if (drawLeftOut) {
+        *drawLeftOut = false;
+    }
+    // Every "no answer" goes through here, so the diagnostic can say which
+    // rule it was and on which line.
+    int lineNumber = 0;
+    const auto refuse = [&](const char *rule, const QString &lineText) -> std::optional<QStringList> {
+        if (refusal) {
+            refusal->rule = QString::fromLatin1(rule);
+            refusal->statement = lineText;
+            refusal->position = lineNumber;
+        }
+        return std::nullopt;
+    };
+
+    QStringList kept;
+    // The header ends at '%' or M95, exactly where the parser stops reading
+    // unit lines (its headerDone flag).
+    bool headerDone = false;
+    // The unit the parser is using at this point: inch until a header
+    // INCH/METRIC line says otherwise (its default, GerberFormat).
+    bool unitIsInch = true;
+    QSet<int> definedTools; // tool numbers that already have a diameter
+    // Case-insensitive whole-line test, the way the parser compares its
+    // M/G command lines.
+    const auto lineIs = [](const QString &line, const char *command) {
+        return line.compare(QLatin1String(command), Qt::CaseInsensitive) == 0;
+    };
+    for (const QString &rawLine : content.split(QLatin1Char('\n'))) {
+        ++lineNumber;
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        if (line.startsWith(QLatin1Char(';'))) {
+            if (!ExportNoise::isVolatileComment(line.mid(1))) {
+                kept << line;
+            }
+            continue;
+        }
+        // Tool lines are checked before the X/Y test on purpose. Only a BARE
+        // select ("T03") is left out; anything else starting with T - a
+        // definition "T03C0.800", or "T03X..Y.." which the parser reads as a
+        // plain select and so draws nothing for - is kept, so a difference
+        // the object model cannot see still shows up here.
+        const ToolLine tool = parseToolLine(line);
+        if (tool.isToolLine) {
+            // A definition is a tool line with a diameter (the same test the
+            // parser uses). The parser keeps only the LAST diameter of a
+            // tool number, and the holes store just the number, so a second
+            // definition would resize holes drilled before it - and where
+            // it sits among the hole lines is not compared. Refuse.
+            if (!tool.diameterText.isEmpty()) {
+                if (definedTools.contains(tool.number)) {
+                    return refuse("tool defined twice", line);
+                }
+                definedTools.insert(tool.number);
+            }
+            const bool bareSelect = std::all_of(line.begin() + 1, line.end(), [](QChar c) { return c.isDigit(); });
+            if (!bareSelect) {
+                kept << line;
+            }
+            continue;
+        }
+        // "R05X0.5" repeats the previous hole 5 times, shifted by X0.5. The
+        // parser does not read repeats at all, so nothing in the object model
+        // reflects them and no comparison of the text can vouch for them:
+        // a file using R is never "same data".
+        static const QRegularExpression repeatLine(QStringLiteral("^R\\d"));
+        if (repeatLine.match(line).hasMatch()) {
+            return refuse("R repeat command", line);
+        }
+        // A line is left out as geometry only when the WHOLE line is in a
+        // form the parser really reads. Anything else falls through to the
+        // allow-list below: a G85 slot or a G00-G03 line the forms here did
+        // not take (an I/J offset on a straight G01) is kept and compared as
+        // text; every other line refuses unless the allow-list names it.
+        // I/J are only read on arcs (G02/G03).
+        // A number must be well formed: optional sign, then digits with an
+        // optional point, or a point followed by digits. A loose pattern would
+        // accept "1.0.5", which toDouble reads as 0, so two different
+        // malformed values would look identical in the object model. A
+        // malformed number fails the match, is not on the allow-list, and so
+        // makes the whole file refuse.
+        // The digit counts are capped too, so two different numbers can never
+        // decode to the same hole: without a point, at most 12 digits (the
+        // same cap as the Gerber side - it always fits the integer decode);
+        // with a point, at most 6 digits on each side, so the value stays
+        // exact in a double and a change in the last digit (1 nm in mm) still
+        // moves the hole after rounding to nanometres. A longer number fails
+        // the match and makes the file refuse.
+        static const QString num = QStringLiteral("[+-]?(?:\\d{1,12}|\\d{1,6}\\.\\d{0,6}|\\.\\d{1,6})");
+        static const QRegularExpression holeOrModalMove(
+            QStringLiteral("^(X%1)?(Y%1)?$").arg(num));
+        static const QRegularExpression linearOrRoutMove(
+            QStringLiteral("^G0[0-3](X%1)?(Y%1)?$").arg(num));
+        static const QRegularExpression arcMove(
+            QStringLiteral("^G0[23](X%1)?(Y%1)?(I%1)?(J%1)?$").arg(num));
+        // The first form also matches an empty string, but empty lines were
+        // skipped above, so a match here always has at least one of X/Y.
+        if (holeOrModalMove.match(line).hasMatch() || linearOrRoutMove.match(line).hasMatch()
+            || arcMove.match(line).hasMatch()) {
+            if (drawLeftOut) {
+                *drawLeftOut = true;
+            }
+            continue; // a hole or a rout move - lives in the object model
+        }
+
+        // Everything else is kept as text ONLY if it is a line the parser
+        // handles, or one that cannot move or resize a hole. Kept text loses
+        // its place among the hole lines (those are left out above), so a
+        // command that changes how LATER holes are read - G91 incremental,
+        // a unit switch mid-program, pattern or mirror commands - would look
+        // the same in both files wherever it sat. The parser ignores those,
+        // so nothing can vouch for them: anything not listed here refuses.
+        if (lineIs(line, "M30") || lineIs(line, "M00")) {
+            kept << line;
+            break; // the parser stops here too; whatever follows is never drawn
+        }
+        if (lineIs(line, "%") || lineIs(line, "M95")) {
+            headerDone = true; // the parser's header end
+            kept << line;
+            continue;
+        }
+        // M48 (header start) and G90 (absolute, the default) change nothing;
+        // M15/M16 (tool down/up) and G05 (back to drilling) are read by the
+        // parser, and what they change shows up in the objects as strokes
+        // versus holes.
+        if (lineIs(line, "M48") || lineIs(line, "G90") || lineIs(line, "M15") || lineIs(line, "M16")
+            || lineIs(line, "G05")) {
+            kept << line;
+            continue;
+        }
+        // A G00-G03 line the forms above did not take (an I/J on a straight
+        // move, ...): the parser reads it as a rout move, so its effect is in
+        // the objects, and the text catches what the objects cannot see.
+        static const QRegularExpression routCommand(QStringLiteral("^G0[0-3]"),
+                                                    QRegularExpression::CaseInsensitiveOption);
+        if (routCommand.match(line).hasMatch()) {
+            kept << line;
+            continue;
+        }
+        // INCH / METRIC: the parser reads the unit only in the header. After
+        // it, the line is ignored, but the holes after it are meant in the
+        // new unit - refuse.
+        if (line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive)
+            || line.startsWith(QLatin1String("METRIC"), Qt::CaseInsensitive)) {
+            if (headerDone) {
+                return refuse("unit line after the header", line);
+            }
+            unitIsInch = line.startsWith(QLatin1String("INCH"), Qt::CaseInsensitive);
+            kept << line;
+            continue;
+        }
+        // M71 (metric) / M72 (inch): the parser ignores both. Eagle writes M72
+        // at the top of its drill files with no INCH line, and older KiCad
+        // writes M71/M72 after the '%'. Such a command changes nothing only
+        // when it names the unit the parser is already using at that point;
+        // one that names the other unit means the holes are in a unit the
+        // parser never switched to, so the pair refuses.
+        const bool isM71 = lineIs(line, "M71");
+        const bool isM72 = lineIs(line, "M72");
+        if (isM71 || isM72) {
+            if (isM72 != unitIsInch) {
+                return refuse("M71/M72 names a different unit than the parser uses", line);
+            }
+            kept << line;
+            continue;
+        }
+        // ICI (old Excellon header, not in the newer XNC subset): ICI,OFF
+        // means absolute coordinates, which is what the parser reads anyway,
+        // so it changes nothing. ICI,ON - or a bare ICI - makes every hole
+        // an offset from the last one, which the parser does not read (KiCad
+        // reads the switch the same way). Anything else is not a value we
+        // know.
+        if (lineIs(line, "ICI,OFF")) {
+            kept << line;
+            continue;
+        }
+        if (line.startsWith(QLatin1String("ICI"), Qt::CaseInsensitive)) {
+            return refuse("ICI incremental input (only ICI,OFF changes nothing)", line);
+        }
+        // A G85 slot: the parser reads only its start point as a hole, so
+        // the whole line is compared as text. FMAT (format version) draws
+        // nothing.
+        if (line.contains(QLatin1String("G85")) || line.startsWith(QLatin1String("FMAT"))) {
+            kept << line;
+            continue;
+        }
+        return refuse("line the parser does not read", line);
+    }
+    return kept;
 }
