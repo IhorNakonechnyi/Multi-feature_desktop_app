@@ -189,10 +189,17 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     explanation->setWordWrap(true);
     gerberPairList_ = new QListWidget;
     gerberPairList_->setObjectName("pairsList");
-    // Compact by design (the mockup's pill row is content-sized, not
-    // stretched) - sized for ~3 visible rows, scrolls internally if there
-    // are more pairs than fit.
-    gerberPairList_->setMaximumHeight(90);
+    // Always room for exactly 6 rows, however many pairs there are, so the
+    // canvas below keeps the same size from one comparison to the next; more
+    // pairs scroll inside the list. The row height comes from the theme's
+    // padding and margin on the pills, so it is measured on one temporary
+    // row instead of being written down as a number that could drift.
+    constexpr int kVisiblePairRows = 6;
+    gerberPairList_->ensurePolished();
+    gerberPairList_->addItem(QStringLiteral("X"));
+    const int pairRowHeight = gerberPairList_->sizeHintForRow(0);
+    gerberPairList_->clear();
+    gerberPairList_->setFixedHeight(kVisiblePairRows * pairRowHeight + 2 * gerberPairList_->frameWidth());
     pairStatusLabel_ = new QLabel;
     pairStatusLabel_->setObjectName("detailLabel");
     pairStatusLabel_->setWordWrap(true);
