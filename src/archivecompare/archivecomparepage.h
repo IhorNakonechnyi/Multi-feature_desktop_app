@@ -74,8 +74,6 @@ private:
     QListWidget *gerberPairList_;
     QLabel *pairStatusLabel_;
     QLabel *notDrawableLabel_;
-    QLabel *renderTimeLabel_;
-    QLabel *compareTimeLabel_;
 #ifdef PCB_DIAGNOSTICS
     // Diagnostic builds only (samedatadiagnosis.h): why the selected pair is
     // yellow, and which pairs the same-data check was offered.

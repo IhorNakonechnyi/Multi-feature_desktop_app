@@ -55,7 +55,7 @@ Both `ArchiveHeader`s emit `archiveChanged` on a drop or a pick, and both are co
    pair again** to decide which pairs the overlay can draw. **Not timed.**
 6. Fill the pair list.
 
-The "Compare time" label shows `compareMs + sameDataMs` only. Steps 2, 4, 5 and 6 are part
+The "Compare time" label showed `compareMs + sameDataMs` only (label removed on this branch; see the stage-timing design). Steps 2, 4, 5 and 6 are part
 of the freeze but not of the number, so **7.3 s understates the frozen time**.
 
 ### What one yellow pair costs today
@@ -90,7 +90,7 @@ be a real share of the 7.3 s for nested archives.
 `renderShownPair` is synchronous and runs on every `renderRequested` from the canvas: the
 first fit, and also **every zoom, pan and resize**. Two masks (`LayerMaskRenderer::render`,
 a `QImage` each) plus `MaskCompositor::composite`. A very large layer could freeze there
-too. Its time is already shown in the "Render time" label.
+too. Its time used to be shown in the "Render time" label (removed on this branch; the `PCB_TIMING` build reports it now).
 
 ---
 

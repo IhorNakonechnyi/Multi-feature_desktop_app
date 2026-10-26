@@ -1,5 +1,7 @@
 # Gerber Render v2 — M4: Overlay Compare
 
+Note (2026-10-26): the render-time and compare-time labels were removed on branch `multi-threading`; timing lives in the `PCB_TIMING` build (`2026-10-26-stage-timing-diagnostic-design.md`).
+
 Approved by Igor 2026-07-18, after the M3 single-file-viewer gate passed visual comparison
 against CAMMaster. Parent design: `2026-07-18-gerber-render-v2-design.md` (architecture,
 `LayerMask` boundary, milestone list). This doc details M4 only.
