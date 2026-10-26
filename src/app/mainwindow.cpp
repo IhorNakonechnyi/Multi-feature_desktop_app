@@ -1,8 +1,8 @@
 #include "mainwindow.h"
 
 #include <QCoreApplication>
+#include <QHBoxLayout>
 #include <QLabel>
-#include <QSplitter>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -15,16 +15,24 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    auto *splitter = new QSplitter(Qt::Horizontal, this);
+    // Sidebar and page side by side in a plain layout, not a splitter: the
+    // sidebar has one fixed width and cannot be dragged wider or narrower.
+    auto *central = new QWidget(this);
+    auto *centralLayout = new QHBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
 
     // SidebarNav is a QListWidget itself, not a container - it can't hold
     // the wordmark label or the status legend card as direct children, so
     // this wrapper stacks all three: wordmark on top, the nav list taking
     // the remaining space, the legend card pinned to the bottom. This
-    // wrapper - not nav_ directly - is what goes into the splitter.
-    auto *sidebarPanel = new QWidget(splitter);
+    // wrapper - not nav_ directly - is what goes into the layout.
+    auto *sidebarPanel = new QWidget(central);
     sidebarPanel->setObjectName("sidebarPanel");
     sidebarPanel->setAttribute(Qt::WA_StyledBackground, true);
+    // Fixed horizontally: always exactly as wide as its contents ask for
+    // (the nav list's fixed width plus the margins), however wide the
+    // window gets.
+    sidebarPanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     auto *sidebarLayout = new QVBoxLayout(sidebarPanel);
     sidebarLayout->setContentsMargins(10, 16, 10, 16);
     sidebarLayout->setSpacing(4);
@@ -40,16 +48,16 @@ MainWindow::MainWindow(QWidget *parent)
     statusLegend_ = new StatusLegend(sidebarPanel);
     sidebarLayout->addWidget(statusLegend_);
 
-    pages_ = new QStackedWidget(splitter);
+    pages_ = new QStackedWidget(central);
 
     // Order must match SidebarNav's item order - currentRowChanged drives
     // setCurrentIndex directly, no separate mapping needed.
     pages_->addWidget(new ArchiveComparePage);
 
-    splitter->setStretchFactor(0, 0); // sidebar: fixed
-    splitter->setStretchFactor(1, 1); // content: grows
+    centralLayout->addWidget(sidebarPanel);
+    centralLayout->addWidget(pages_, 1); // content: takes all remaining width
 
-    setCentralWidget(splitter);
+    setCentralWidget(central);
 #ifdef PCB_DIAGNOSTICS
     // A diagnostic build (CMake option PCB_DIAGNOSTICS) carries the same-data
     // diagnostics under the canvas; the title says so, so it is never
