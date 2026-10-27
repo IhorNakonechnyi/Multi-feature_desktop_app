@@ -31,11 +31,13 @@
 #ifdef PCB_TIMING // TIMING-DIAG
 #include <QClipboard>
 #include <QElapsedTimer>
+#include <QEvent>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTextDocument>
+#include <QTimer>
 #endif
 
 namespace {
@@ -296,6 +298,8 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
             [this](int row) { if (row >= 0) showSelectedPair(); });
     connect(gerberCanvas_, &CompositeView::renderRequested, this, &ArchiveComparePage::renderShownPair);
 #ifdef PCB_TIMING // TIMING-DIAG
+    panelA_->treeViewport()->installEventFilter(this);
+    panelB_->treeViewport()->installEventFilter(this);
     showTiming(); // starts as all dashes
 #endif
 }
@@ -304,6 +308,37 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
 void ArchiveComparePage::showTiming()
 {
     timingBox_->setPlainText(StageTiming::formatReport(lastCompare_, lastClick_));
+}
+
+StageTiming::SideCounts ArchiveComparePage::countSide(const QVector<ArchiveEntry> &entries,
+                                                      const ArchivePanel *panel) const
+{
+    StageTiming::SideCounts counts;
+    counts.files = static_cast<int>(entries.size());
+    counts.rowsShown = panel->shownRowCount();
+    for (const ArchiveEntry &entry : entries) {
+        if (entry.kind == DataKind::GerberData) {
+            ++counts.gerberFiles;
+            counts.gerberBytes += static_cast<qint64>(entry.sizeBytes);
+        }
+    }
+    return counts;
+}
+
+bool ArchiveComparePage::eventFilter(QObject *watched, QEvent *event)
+{
+    if (awaitingPaint_ && event->type() == QEvent::Paint) {
+        awaitingPaint_ = false;
+        // A zero timer fires once this paint pass is over, so the time
+        // includes the paint itself, not just its start.
+        QTimer::singleShot(0, this, [this] {
+            if (lastCompare_) {
+                lastCompare_->untilPaintedMs = compareClock_.elapsed();
+                showTiming();
+            }
+        });
+    }
+    return QWidget::eventFilter(watched, event); // only watching, never consuming
 }
 #endif
 
@@ -320,9 +355,15 @@ void ArchiveComparePage::runComparison()
 #ifdef PCB_TIMING // TIMING-DIAG
     // Reset first, so every early return below leaves dashes, not the
     // previous run's numbers.
-    QElapsedTimer totalTimer;
-    totalTimer.start();
+    compareClock_.start();
     StageTiming::CompareTimes times;
+    times.sincePreviousPickMs = pickClock_.isValid() ? pickClock_.elapsed() : -1;
+    pickClock_.start();
+    const StageTiming::MemoryUse memoryAtStart = StageTiming::readMemoryUse();
+    times.privateStartBytes = memoryAtStart.privateBytes;
+    times.peakBeforeBytes = memoryAtStart.peakBytes;
+    StageTiming::treeTimes() = {};
+    awaitingPaint_ = false;
     lastCompare_.reset();
     lastClick_.reset();
     showTiming();
@@ -406,6 +447,9 @@ void ArchiveComparePage::runComparison()
     // whole files, unlike the head-only reads above. Synchronous, like the
     // rest of the compare.
 #ifdef PCB_TIMING // TIMING-DIAG
+    times.differingPairs = static_cast<int>(outcome.result.differingPairs.size());
+    QElapsedTimer checkTimer;
+    checkTimer.start();
     SameDataCheck::collapseSameDataPairs(outcome.result, [this, &times](const DifferingPair &pair) {
 #else
     SameDataCheck::collapseSameDataPairs(outcome.result, [this](const DifferingPair &pair) {
@@ -425,7 +469,8 @@ void ArchiveComparePage::runComparison()
 #ifdef PCB_TIMING // TIMING-DIAG
         // Same answer as the plain return below; a failed read is never
         // parsed, so it adds no parse time or bytes.
-        times.checkReadMs += readTimer.elapsed();
+        const qint64 readMs = readTimer.elapsed();
+        times.checkReadMs += readMs;
         if (!foundA || !foundB) {
             return false;
         }
@@ -436,6 +481,13 @@ void ArchiveComparePage::runComparison()
         const qint64 pairBytes = bytesA.size() + bytesB.size();
         times.checkParseMs += parseMs;
         times.parsedBytes += pairBytes;
+        // Read + parse together: that is what one worker would do per pair
+        // if the check ran pairs in parallel, so the slowest pair is the
+        // floor such a check could not go below.
+        if (readMs + parseMs > times.slowestPairMs) {
+            times.slowestPairMs = readMs + parseMs;
+            times.slowestPairBytes = pairBytes;
+        }
         if (same) {
             ++times.pairsGreen;
             times.greenParseMs += parseMs;
@@ -446,12 +498,21 @@ void ArchiveComparePage::runComparison()
         return foundA && foundB && SameDataCheck::isSameData(bytesA, bytesB);
 #endif
     });
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.checkTotalMs = checkTimer.elapsed();
+    times.privateAfterCheckBytes = StageTiming::readMemoryUse().privateBytes;
+    QElapsedTimer summaryTimer;
+    summaryTimer.start();
+#endif
 
     const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
     summaryLabel_->setText(ComparisonSummary::formatSummaryLine(summary));
 
     identicalBanner_->setText(tr("No differences - both archives contain the same data."));
     identicalBanner_->setVisible(summary.fullyIdentical());
+#ifdef PCB_TIMING // TIMING-DIAG
+    times.summaryMs = summaryTimer.elapsed();
+#endif
 
     panelA_->showEntries(outcome.result.entriesA);
     panelB_->showEntries(outcome.result.entriesB);
@@ -471,6 +532,8 @@ void ArchiveComparePage::runComparison()
         GerberDiffTrigger::classifyPairs(outcome.result.differingPairs, readHeadA, readHeadB);
 #ifdef PCB_TIMING // TIMING-DIAG
     times.overlayClassMs = overlayClassTimer.elapsed();
+    QElapsedTimer pairListTimer;
+    pairListTimer.start();
 #endif
 
     eligiblePairs_ = buckets.drawable;
@@ -482,10 +545,17 @@ void ArchiveComparePage::runComparison()
 
     updateNotDrawableLabel(buckets.notDrawable.size());
 #ifdef PCB_TIMING // TIMING-DIAG
-    times.totalMs = totalTimer.elapsed();
+    times.pairListMs = pairListTimer.elapsed();
+    times.totalMs = compareClock_.elapsed();
     times.memory = StageTiming::readMemoryUse();
+    // Counted after the clock stopped, so the counting is in no timer.
+    times.trees = StageTiming::treeTimes();
+    times.drawablePairs = static_cast<int>(eligiblePairs_.size());
+    times.sideA = countSide(outcome.result.entriesA, panelA_);
+    times.sideB = countSide(outcome.result.entriesB, panelB_);
     lastCompare_ = times;
     showTiming();
+    awaitingPaint_ = true;
 #endif
 }
 
@@ -623,6 +693,10 @@ void ArchiveComparePage::showSelectedPair()
 
 #ifdef PCB_TIMING // TIMING-DIAG
     StageTiming::ClickTimes clickTimes;
+    // Read before anything of this pair exists; the previous pair's layers
+    // are still held, so "after parse" minus this is the new pair's cost
+    // only if both pairs are of a similar size.
+    clickTimes.privateBeforeBytes = StageTiming::readMemoryUse().privateBytes;
     QElapsedTimer clickTimer;
     clickTimer.start();
 #endif
@@ -660,9 +734,12 @@ void ArchiveComparePage::showSelectedPair()
     shownLayerB_ = parseGerberOrDrill(bytesB, parseErrorB);
 #ifdef PCB_TIMING // TIMING-DIAG
     clickTimes.parseMs = clickTimer.elapsed();
+    clickTimes.fileBytes = bytesA.size() + bytesB.size();
+    clickTimes.objects = static_cast<int>(shownLayerA_.objects.size() + shownLayerB_.objects.size());
     // Before fitTo(), so a pair that never renders still shows read/parse;
     // renderShownPair() fills in the render time.
     clickTimes.memory = StageTiming::readMemoryUse();
+    clickTimes.privateAfterParseBytes = clickTimes.memory.privateBytes;
     lastClick_ = clickTimes;
     showTiming();
 #endif
@@ -742,6 +819,10 @@ void ArchiveComparePage::renderShownPair(const QRectF &windowMm, double pxPerMm)
     if (lastClick_) {
         lastClick_->renderMs = renderTimer.elapsed();
         lastClick_->renderPx = composite.size();
+        if (lastClick_->renderMs > lastClick_->slowestRenderMs) {
+            lastClick_->slowestRenderMs = lastClick_->renderMs;
+            lastClick_->slowestRenderPx = lastClick_->renderPx;
+        }
         lastClick_->memory = StageTiming::readMemoryUse();
         showTiming();
     }

@@ -10,6 +10,13 @@
 #include "archivedroputil.h"
 #include "archivetreedelegate.h"
 #include "archivetreemodel.h"
+#ifdef PCB_TIMING // TIMING-DIAG
+#include <functional>
+
+#include <QElapsedTimer>
+
+#include "stagetiming.h"
+#endif
 
 ArchivePanel::ArchivePanel(QWidget *parent)
     : QWidget(parent)
@@ -47,19 +54,74 @@ ArchivePanel::ArchivePanel(QWidget *parent)
 
 void ArchivePanel::showEntries(const QVector<ArchiveEntry> &entries)
 {
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer timer;
+    timer.start();
+#endif
     model_->buildFrom(entries);
+#ifdef PCB_TIMING // TIMING-DIAG
+    addBuildTime(timer);
+#endif
     treeView_->expandAll();
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::treeTimes().expandMs += timer.restart();
+#endif
     // Column must be re-sized to the new content every time - a fresh
     // archive's names are a different width than the last one's.
     treeView_->resizeColumnToContents(0);
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::treeTimes().widthMs += timer.elapsed();
+#endif
 }
 
 void ArchivePanel::setFilter(const TreeFilter &filter)
 {
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer timer;
+    timer.start();
+#endif
     model_->setFilter(filter);
+#ifdef PCB_TIMING // TIMING-DIAG
+    addBuildTime(timer);
+#endif
     treeView_->expandAll();
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::treeTimes().expandMs += timer.restart();
+#endif
     treeView_->resizeColumnToContents(0);
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::treeTimes().widthMs += timer.elapsed();
+#endif
 }
+
+#ifdef PCB_TIMING // TIMING-DIAG
+void ArchivePanel::addBuildTime(QElapsedTimer &timer)
+{
+    StageTiming::treeTimes().buildMs += timer.restart();
+    ++StageTiming::treeTimes().builds;
+}
+
+int ArchivePanel::shownRowCount() const
+{
+    // Every row the view holds once expanded, folders included - what
+    // expandAll and resizeColumnToContents have to walk.
+    int count = 0;
+    const std::function<void(const QModelIndex &)> walk = [&](const QModelIndex &parent) {
+        const int rows = model_->rowCount(parent);
+        count += rows;
+        for (int row = 0; row < rows; ++row) {
+            walk(model_->index(row, 0, parent));
+        }
+    };
+    walk(QModelIndex());
+    return count;
+}
+
+QWidget *ArchivePanel::treeViewport() const
+{
+    return treeView_->viewport();
+}
+#endif
 
 bool ArchivePanel::isEmptyAfterFilter() const
 {

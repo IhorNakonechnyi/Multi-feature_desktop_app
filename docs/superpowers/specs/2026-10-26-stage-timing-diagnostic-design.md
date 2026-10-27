@@ -184,3 +184,33 @@ Notes:
 - Text box height and styling (reuse the theme's existing card
   look; no new theme colours).
 - Number formatting (MB with one decimal is enough).
+
+---
+
+## 7. Second round of values (2026-10-27)
+
+The first run on four real archive pairs showed "Everything else" at 1.0-1.6 s in every
+case, the largest share in three of four - so it is split, as section 4 said it would be.
+Added because each one decides something:
+
+| Value | Measured as | Decides |
+|---|---|---|
+| **Until painted** | compare start -> end of the first paint of either tree (zero timer from the paint) | the freeze after `runComparison` returns (layout + paint) |
+| **Check other** | whole `collapseSameDataPairs` − reads − parse | whether the walk itself (sort, hashes) matters |
+| **Summary** | `summarize` + summary line + banner | completes the split |
+| **Trees build / expand / column width** | `ArchiveTreeModel` rebuild, `expandAll`, `resizeColumnToContents`, summed over both panels and every rebuild | which tree step to fix - none of it can move off the UI thread |
+| **Tree rebuilds** | count of those rebuilds | confirms the triple rebuild per compare |
+| **Pair list** | pair list fill + not-drawable label | completes the split |
+| **Slowest pair** | read + parse of the slowest single checked pair, with its MB | the floor a parallel pair check cannot go below |
+| **Pairs differing / drawable** | pairs before the check; pairs in the overlay list | scale |
+| **Archive A/B** | files, tree rows shown, Gerber/drill files and their uncompressed MB | scale; Gerber MB × parse speed = option A's background work per archive |
+| **Since previous pick** | time since the previous `archiveChanged` | option A's idle window (the compare starts on the second pick) |
+| **Peak this run** | peak working set if it grew during this run, else "<= earlier peak" | per-run peak without restarting the app |
+| **Private start/after check/end** | `PrivateUsage` at those points | what a compare allocates and keeps |
+| **Click: slowest render since click** | max render time over zoom/pan/resize | whether panning needs option C |
+| **Click: files, parsed objects, private before/after** | file MB, object count of both layers, `PrivateUsage` | memory per MB of parsed file, for option B |
+| **PC** | CPU name (registry), thread count, total RAM | tells runs on different PCs apart; thread count scales a parallel check |
+
+The tree timers live in `archivepanel.cpp` (behind `PCB_TIMING`, marked `TIMING-DIAG`) and add
+into a process-wide `StageTiming::treeTimes()` that the page resets at each compare. The PC
+line is hardware only, never a user or machine name.

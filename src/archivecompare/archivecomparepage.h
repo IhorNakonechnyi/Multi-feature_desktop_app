@@ -11,6 +11,8 @@
 #ifdef PCB_TIMING // TIMING-DIAG
 #include <optional>
 
+#include <QElapsedTimer>
+
 #include "stagetiming.h"
 
 class QPlainTextEdit;
@@ -91,9 +93,17 @@ private:
     // Timing builds only (stagetiming.h): the last comparison's and the
     // last click's stage times, shown as copyable text in timingBox_.
     void showTiming();
+    StageTiming::SideCounts countSide(const QVector<ArchiveEntry> &entries, const ArchivePanel *panel) const;
+    // Watches the two tree viewports for the first paint after a
+    // comparison, so "Until painted" covers the layout and paint that run
+    // after runComparison() returns.
+    bool eventFilter(QObject *watched, QEvent *event) override;
     QPlainTextEdit *timingBox_;
     std::optional<StageTiming::CompareTimes> lastCompare_;
     std::optional<StageTiming::ClickTimes> lastClick_;
+    QElapsedTimer compareClock_; // started at each runComparison()
+    QElapsedTimer pickClock_;    // restarted at each archive pick
+    bool awaitingPaint_ = false;
 #endif
     CompositeView *gerberCanvas_;
 

@@ -5,6 +5,9 @@
 #include "archivecomparisonresult.h"
 #include "archivetreemodel.h" // TreeFilter
 
+#ifdef PCB_TIMING // TIMING-DIAG
+class QElapsedTimer;
+#endif
 class QLabel;
 class QStackedLayout;
 class QTreeView;
@@ -34,6 +37,12 @@ public:
     // as a bug, especially when the user has just switched a filter on.
     void showEmptyMessage(const QString &message);
 
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Timing builds only (stagetiming.h).
+    int shownRowCount() const;
+    QWidget *treeViewport() const;
+#endif
+
 signals:
     // A valid archive was dropped on the tree; the page hands it to this
     // side's header, which owns the path.
@@ -44,6 +53,9 @@ protected:
     void dropEvent(QDropEvent *event) override;
 
 private:
+#ifdef PCB_TIMING // TIMING-DIAG
+    void addBuildTime(QElapsedTimer &timer);
+#endif
     QTreeView *treeView_;
     ArchiveTreeModel *model_;
     QStackedLayout *stack_;

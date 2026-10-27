@@ -1,7 +1,9 @@
 // TIMING-DIAG: temporary, multi-threading branch only - delete before merge.
 #include "stagetiming.h"
 
+#include <QSettings>
 #include <QStringList>
+#include <QThread>
 
 // The process memory counters come from Windows itself (psapi) - the app
 // is Windows-only, and this file exists only in the timing build.
@@ -17,7 +19,13 @@ constexpr double kBytesPerMb = 1024.0 * 1024.0;
 
 QString ms(qint64 value)
 {
-    return QStringLiteral("%1 ms").arg(value);
+    return value >= 0 ? QStringLiteral("%1 ms").arg(value) : QStringLiteral("-");
+}
+
+QString mb(qint64 bytes)
+{
+    // One decimal: a click's memory change can be well under 1 MB.
+    return bytes >= 0 ? QString::number(bytes / kBytesPerMb, 'f', 1) : QStringLiteral("-");
 }
 
 QString memory(const MemoryUse &use)
@@ -25,9 +33,7 @@ QString memory(const MemoryUse &use)
     if (use.nowBytes < 0 || use.peakBytes < 0) {
         return QStringLiteral("-");
     }
-    return QStringLiteral("%1/%2 MB")
-        .arg(qRound64(use.nowBytes / kBytesPerMb))
-        .arg(qRound64(use.peakBytes / kBytesPerMb));
+    return QStringLiteral("%1/%2 MB").arg(mb(use.nowBytes), mb(use.peakBytes));
 }
 
 QString megabytes(qint64 bytes)
@@ -35,15 +41,53 @@ QString megabytes(qint64 bytes)
     return QString::number(bytes / kBytesPerMb, 'f', 1);
 }
 
+QString side(const SideCounts &counts)
+{
+    return QStringLiteral("%1 files, %2 rows shown, %3 Gerber/drill files, %4 MB Gerber/drill")
+        .arg(counts.files)
+        .arg(counts.rowsShown)
+        .arg(counts.gerberFiles)
+        .arg(megabytes(counts.gerberBytes));
+}
+
+// The PC the numbers came from, so runs on different machines can be told
+// apart. Read once: none of it changes while the app runs.
+QString pcLine()
+{
+    static const QString line = [] {
+        const QSettings cpu(QStringLiteral("HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"),
+                            QSettings::NativeFormat);
+        const QString cpuName = cpu.value(QStringLiteral("ProcessorNameString")).toString().simplified();
+        MEMORYSTATUSEX status{};
+        status.dwLength = sizeof(status);
+        const QString ram = GlobalMemoryStatusEx(&status)
+            ? QString::number(status.ullTotalPhys / (kBytesPerMb * 1024.0), 'f', 1) + QStringLiteral(" GB RAM")
+            : QStringLiteral("RAM -");
+        return QStringLiteral("%1, %2 threads, %3")
+            .arg(cpuName.isEmpty() ? QStringLiteral("CPU -") : cpuName)
+            .arg(QThread::idealThreadCount())
+            .arg(ram);
+    }();
+    return line;
+}
+
 } // namespace
+
+TreeTimes &treeTimes()
+{
+    static TreeTimes times;
+    return times;
+}
 
 MemoryUse readMemoryUse()
 {
     MemoryUse use;
-    PROCESS_MEMORY_COUNTERS counters{};
-    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) {
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&counters),
+                             sizeof(counters))) {
         use.nowBytes = static_cast<qint64>(counters.WorkingSetSize);
         use.peakBytes = static_cast<qint64>(counters.PeakWorkingSetSize);
+        use.privateBytes = static_cast<qint64>(counters.PrivateUsage);
     }
     return use;
 }
@@ -56,48 +100,91 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
     lines << QStringLiteral("Last compare");
     if (compare) {
         const CompareTimes &c = *compare;
-        const qint64 measured = c.zipMs + c.typesMs + c.checkReadMs + c.checkParseMs + c.overlayClassMs;
+        const qint64 checkOther = c.checkTotalMs - c.checkReadMs - c.checkParseMs;
+        const qint64 treesMs = c.trees.buildMs + c.trees.expandMs + c.trees.widthMs;
+        const qint64 measured = c.zipMs + c.typesMs + c.checkTotalMs + c.summaryMs + treesMs + c.overlayClassMs
+            + c.pairListMs;
         // A real change stops the check early, so only green pairs (fully
         // parsed) give an honest parse speed.
         const QString parseSpeed = c.greenBytes > 0
             ? QStringLiteral("%1 ms/MB").arg(qRound64(c.greenParseMs / (c.greenBytes / kBytesPerMb)))
             : dash;
+        const QString slowest = c.slowestPairMs >= 0
+            ? QStringLiteral("%1, %2 MB").arg(ms(c.slowestPairMs), megabytes(c.slowestPairBytes))
+            : dash;
+        // Peak working set only ever grows, so a peak that grew during this
+        // run is this run's peak; one that did not means this run stayed
+        // under an earlier run's peak.
+        QString runPeak = dash;
+        if (c.memory.peakBytes >= 0 && c.peakBeforeBytes >= 0) {
+            runPeak = c.memory.peakBytes > c.peakBeforeBytes
+                ? mb(c.memory.peakBytes) + QStringLiteral(" MB")
+                : QStringLiteral("<= %1 MB (an earlier run was higher)").arg(mb(c.peakBeforeBytes));
+        }
         lines << QStringLiteral("Total: ") + ms(c.totalMs)
+              << QStringLiteral("Until painted: ") + ms(c.untilPaintedMs)
               << QStringLiteral("Zip compare: ") + ms(c.zipMs)
               << QStringLiteral("File types: ") + ms(c.typesMs)
               << QStringLiteral("Check reads: ") + ms(c.checkReadMs)
               << QStringLiteral("Check parse: ") + ms(c.checkParseMs)
-              << QStringLiteral("Parse speed: ") + parseSpeed
+              << QStringLiteral("Check other: ") + ms(checkOther)
+              << QStringLiteral("Summary: ") + ms(c.summaryMs)
+              << QStringLiteral("Trees build: ") + ms(c.trees.buildMs)
+              << QStringLiteral("Trees expand: ") + ms(c.trees.expandMs)
+              << QStringLiteral("Trees column width: ") + ms(c.trees.widthMs)
+              << QStringLiteral("Tree rebuilds: %1").arg(c.trees.builds)
               << QStringLiteral("Overlay classification: ") + ms(c.overlayClassMs)
+              << QStringLiteral("Pair list: ") + ms(c.pairListMs)
               << QStringLiteral("Everything else: ") + ms(c.totalMs - measured)
-              << QStringLiteral("Memory now/peak: ") + memory(c.memory)
-              << QStringLiteral("Pairs checked: %1, turned green: %2, MB parsed: %3")
+              << QStringLiteral("Parse speed: ") + parseSpeed
+              << QStringLiteral("Slowest pair: ") + slowest
+              << QStringLiteral("Pairs differing: %1, checked: %2, turned green: %3, drawable: %4, MB parsed: %5")
+                     .arg(c.differingPairs)
                      .arg(c.pairsChecked)
                      .arg(c.pairsGreen)
-                     .arg(megabytes(c.parsedBytes));
+                     .arg(c.drawablePairs)
+                     .arg(megabytes(c.parsedBytes))
+              << QStringLiteral("Archive A: ") + side(c.sideA)
+              << QStringLiteral("Archive B: ") + side(c.sideB)
+              << QStringLiteral("Since previous pick: ") + ms(c.sincePreviousPickMs)
+              << QStringLiteral("Memory now/peak: ") + memory(c.memory)
+              << QStringLiteral("Peak this run: ") + runPeak
+              << QStringLiteral("Private start/after check/end: %1/%2/%3 MB")
+                     .arg(mb(c.privateStartBytes), mb(c.privateAfterCheckBytes), mb(c.memory.privateBytes));
     } else {
-        for (const char *name : {"Total", "Zip compare", "File types", "Check reads", "Check parse", "Parse speed",
-                                 "Overlay classification", "Everything else", "Memory now/peak"}) {
+        for (const char *name : {"Total", "Until painted", "Zip compare", "File types", "Check reads", "Check parse",
+                                 "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
+                                 "Tree rebuilds", "Overlay classification", "Pair list", "Everything else",
+                                 "Parse speed", "Slowest pair", "Pairs", "Archive A", "Archive B",
+                                 "Since previous pick", "Memory now/peak", "Peak this run",
+                                 "Private start/after check/end"}) {
             lines << QLatin1String(name) + QStringLiteral(": -");
         }
-        lines << QStringLiteral("Pairs checked: -, turned green: -, MB parsed: -");
     }
 
     lines << QStringLiteral("Last click");
     if (click) {
         const ClickTimes &c = *click;
-        const QString render = c.renderMs >= 0
-            ? QStringLiteral("%1 @ %2x%3 px").arg(ms(c.renderMs)).arg(c.renderPx.width()).arg(c.renderPx.height())
-            : dash;
+        const auto render = [&dash](qint64 renderMs, const QSize &px) {
+            return renderMs >= 0 ? QStringLiteral("%1 @ %2x%3 px").arg(ms(renderMs)).arg(px.width()).arg(px.height())
+                                 : dash;
+        };
         lines << QStringLiteral("Read: ") + ms(c.readMs)
               << QStringLiteral("Parse: ") + ms(c.parseMs)
-              << QStringLiteral("Render: ") + render
-              << QStringLiteral("Memory now/peak: ") + memory(c.memory);
+              << QStringLiteral("Render: ") + render(c.renderMs, c.renderPx)
+              << QStringLiteral("Slowest render since click: ") + render(c.slowestRenderMs, c.slowestRenderPx)
+              << QStringLiteral("Files: %1 MB, parsed objects: %2").arg(megabytes(c.fileBytes)).arg(c.objects)
+              << QStringLiteral("Memory now/peak: ") + memory(c.memory)
+              << QStringLiteral("Private before read/after parse: %1/%2 MB")
+                     .arg(mb(c.privateBeforeBytes), mb(c.privateAfterParseBytes));
     } else {
-        for (const char *name : {"Read", "Parse", "Render", "Memory now/peak"}) {
+        for (const char *name : {"Read", "Parse", "Render", "Slowest render since click", "Files", "Memory now/peak",
+                                 "Private before read/after parse"}) {
             lines << QLatin1String(name) + QStringLiteral(": -");
         }
     }
+
+    lines << QStringLiteral("PC: ") + pcLine();
 
     return lines.join(QLatin1Char('\n'));
 }
