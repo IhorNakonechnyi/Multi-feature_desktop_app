@@ -516,10 +516,12 @@ void ArchiveComparePage::runComparison()
 
     panelA_->showEntries(outcome.result.entriesA);
     panelB_->showEntries(outcome.result.entriesB);
-    // Re-applied over the fresh entries: the bar keeps its state across a
-    // re-pick, so the trees must honour it immediately rather than showing
-    // everything until the user touches a control.
-    applyFilters();
+    // The bar keeps its state across a re-pick, and so does each panel's
+    // model (ArchiveTreeModel::buildFrom keeps its filter), so the trees
+    // above are already filtered - re-applying the filter here would only
+    // rebuild, expand and re-measure both trees a second time. Only the
+    // empty-pane messages are left to update.
+    updateEmptyMessages(currentFilter());
 
     // Content, not extension, decides which pairs the overlay can draw
     // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
@@ -615,7 +617,7 @@ void ArchiveComparePage::updatePanelWidths()
     panelB_->setFixedWidth(panelWidth);
 }
 
-void ArchiveComparePage::applyFilters()
+TreeFilter ArchiveComparePage::currentFilter() const
 {
     TreeFilter filter;
     filter.changedOnly = onlyChangesCheck_->isChecked();
@@ -623,6 +625,12 @@ void ArchiveComparePage::applyFilters()
     if (kindValue >= 0) {
         filter.kind = static_cast<DataKind>(kindValue);
     }
+    return filter;
+}
+
+void ArchiveComparePage::applyFilters()
+{
+    const TreeFilter filter = currentFilter();
 
     // Both panels, always - one bar means one view of both archives. A bar
     // that silently applied to only one side would make the two trees
@@ -630,6 +638,11 @@ void ArchiveComparePage::applyFilters()
     panelA_->setFilter(filter);
     panelB_->setFilter(filter);
 
+    updateEmptyMessages(filter);
+}
+
+void ArchiveComparePage::updateEmptyMessages(const TreeFilter &filter)
+{
     const QString message = emptyAfterFilterMessage(filter);
     panelA_->showEmptyMessage(panelA_->isEmptyAfterFilter() ? message : QString());
     panelB_->showEmptyMessage(panelB_->isEmptyAfterFilter() ? message : QString());

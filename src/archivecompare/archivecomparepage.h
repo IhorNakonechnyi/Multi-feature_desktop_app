@@ -26,6 +26,7 @@ class QComboBox;
 class QLabel;
 class QListWidget;
 class QWidget;
+struct TreeFilter;
 
 // The Archive Compare feature page, re-compared automatically whenever
 // either archive changes.
@@ -55,7 +56,9 @@ protected:
 private:
     void runComparison();
     void clearSummary();
+    TreeFilter currentFilter() const;
     void applyFilters();
+    void updateEmptyMessages(const TreeFilter &filter);
 
     // Widens the archive columns as the window grows, so a long filename has
     // more room exactly when there is room to give it.
