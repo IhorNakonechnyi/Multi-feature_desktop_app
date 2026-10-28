@@ -34,6 +34,17 @@ struct TreeTimes {
 };
 TreeTimes &treeTimes();
 
+// The stages inside SameDataCheck::isSameData, summed over every checked
+// pair. Global for the same reason as treeTimes(). Nanoseconds, because one
+// small pair's stage is often under a millisecond.
+struct CheckStages {
+    qint64 textNs = 0;     // bytes -> text (QString::fromUtf8), both files
+    qint64 settingsNs = 0; // the settings pass (nonGeometryStatements/Lines)
+    qint64 shapesNs = 0;   // the full parse into shapes
+    qint64 compareNs = 0;  // comparing the two shape lists
+};
+CheckStages &checkStages();
+
 // One archive's side of the comparison, for scaling the numbers.
 struct SideCounts {
     int files = 0;            // entries after nested zips were expanded
@@ -49,6 +60,7 @@ struct CompareTimes {
     qint64 checkReadMs = 0;    // readEntryBytes inside the same-data predicate
     qint64 checkParseMs = 0;   // isSameData inside the same-data predicate
     qint64 checkTotalMs = 0;   // the whole collapseSameDataPairs call
+    CheckStages check;         // copied from checkStages() at the end
     qint64 summaryMs = 0;      // summarize + summary line + banner
     TreeTimes trees;           // copied from treeTimes() at the end
     qint64 overlayClassMs = 0; // classifyPairs

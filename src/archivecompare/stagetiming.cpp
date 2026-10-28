@@ -79,6 +79,12 @@ TreeTimes &treeTimes()
     return times;
 }
 
+CheckStages &checkStages()
+{
+    static CheckStages stages;
+    return stages;
+}
+
 MemoryUse readMemoryUse()
 {
     MemoryUse use;
@@ -127,6 +133,11 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
               << QStringLiteral("File types: ") + ms(c.typesMs)
               << QStringLiteral("Check reads: ") + ms(c.checkReadMs)
               << QStringLiteral("Check parse: ") + ms(c.checkParseMs)
+              << QStringLiteral("Parse split (text/settings/shapes/compare): %1/%2/%3/%4 ms")
+                     .arg(qRound64(c.check.textNs / 1e6))
+                     .arg(qRound64(c.check.settingsNs / 1e6))
+                     .arg(qRound64(c.check.shapesNs / 1e6))
+                     .arg(qRound64(c.check.compareNs / 1e6))
               << QStringLiteral("Check other: ") + ms(checkOther)
               << QStringLiteral("Summary: ") + ms(c.summaryMs)
               << QStringLiteral("Trees build: ") + ms(c.trees.buildMs)
@@ -153,7 +164,7 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
                      .arg(mb(c.privateStartBytes), mb(c.privateAfterCheckBytes), mb(c.memory.privateBytes));
     } else {
         for (const char *name : {"Total", "Until painted", "Zip compare", "File types", "Check reads", "Check parse",
-                                 "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
+                                 "Parse split (text/settings/shapes/compare)", "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
                                  "Tree rebuilds", "Overlay classification", "Pair list", "Everything else",
                                  "Parse speed", "Slowest pair", "Pairs", "Archive A", "Archive B",
                                  "Since previous pick", "Memory now/peak", "Peak this run",

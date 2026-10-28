@@ -10,6 +10,11 @@
 #include "../gerber/gerberfiletype.h"
 #include "../gerber/gerberparser.h"
 #include "../gerber/layerequivalence.h"
+#ifdef PCB_TIMING // TIMING-DIAG
+#include <QElapsedTimer>
+
+#include "stagetiming.h"
+#endif
 
 bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &layerB, bool drawLeftOut)
 {
@@ -33,8 +38,21 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         return false;
     }
 
+#ifdef PCB_TIMING // TIMING-DIAG
+    // Adds the time since the last lap to one stage's total.
+    QElapsedTimer stageTimer;
+    stageTimer.start();
+    StageTiming::CheckStages &stages = StageTiming::checkStages();
+    const auto lap = [&stageTimer](qint64 &stageNs) {
+        stageNs += stageTimer.nsecsElapsed();
+        stageTimer.restart();
+    };
+#endif
     const QString textA = QString::fromUtf8(bytesA);
     const QString textB = QString::fromUtf8(bytesB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    lap(stages.textNs);
+#endif
 
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
@@ -44,26 +62,49 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         bool drawLeftOutB = false;
         const auto restA = GerberParser::nonGeometryStatements(textA, nullptr, &drawLeftOutA);
         const auto restB = GerberParser::nonGeometryStatements(textB, nullptr, &drawLeftOutB);
+#ifdef PCB_TIMING // TIMING-DIAG
+        lap(stages.settingsNs);
+#endif
         if (!restA || !restB || *restA != *restB) {
             return false;
         }
         const Layer layerA = GerberParser::parseContentToObjects(textA);
         const Layer layerB = GerberParser::parseContentToObjects(textB);
+#ifdef PCB_TIMING // TIMING-DIAG
+        lap(stages.shapesNs);
+        const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
+        lap(stages.compareNs);
+        return same;
+#else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
+#endif
     }
 
     bool drawLeftOutA = false;
     bool drawLeftOutB = false;
     const auto restA = ExcellonParser::nonGeometryLines(textA, nullptr, &drawLeftOutA);
     const auto restB = ExcellonParser::nonGeometryLines(textB, nullptr, &drawLeftOutB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    lap(stages.settingsNs);
+#endif
     if (!restA || !restB || *restA != *restB) {
         return false;
     }
     try {
         const Layer layerA = ExcellonParser::parseContentToObjects(textA);
         const Layer layerB = ExcellonParser::parseContentToObjects(textB);
+#ifdef PCB_TIMING // TIMING-DIAG
+        lap(stages.shapesNs);
+        const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
+        lap(stages.compareNs);
+        return same;
+#else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
+#endif
     } catch (const ExcellonParser::AmbiguousFormatError &) {
+#ifdef PCB_TIMING // TIMING-DIAG
+        lap(stages.shapesNs);
+#endif
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
 }

@@ -363,6 +363,7 @@ void ArchiveComparePage::runComparison()
     times.privateStartBytes = memoryAtStart.privateBytes;
     times.peakBeforeBytes = memoryAtStart.peakBytes;
     StageTiming::treeTimes() = {};
+    StageTiming::checkStages() = {};
     awaitingPaint_ = false;
     lastCompare_.reset();
     lastClick_.reset();
@@ -552,6 +553,7 @@ void ArchiveComparePage::runComparison()
     times.memory = StageTiming::readMemoryUse();
     // Counted after the clock stopped, so the counting is in no timer.
     times.trees = StageTiming::treeTimes();
+    times.check = StageTiming::checkStages();
     times.drawablePairs = static_cast<int>(eligiblePairs_.size());
     times.sideA = countSide(outcome.result.entriesA, panelA_);
     times.sideB = countSide(outcome.result.entriesB, panelB_);
