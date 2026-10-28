@@ -32,6 +32,8 @@ private slots:
     void isEmptyAfterFilterReflectsResult();
     void filterSurvivesRebuild();
     void emptyMessageNamesTheActiveCriteria();
+
+    void iconsAreFetchedOnce();
 };
 
 namespace {
@@ -320,6 +322,26 @@ void TestArchiveTreeModel::emptyMessageNamesTheActiveCriteria()
     both.changedOnly = true;
     both.kind = DataKind::GerberData;
     QCOMPARE(emptyAfterFilterMessage(both), QStringLiteral("No changed Gerber files to show"));
+}
+
+void TestArchiveTreeModel::iconsAreFetchedOnce()
+{
+    // The view asks for a row's icon every time it measures the row, and
+    // fetching a fresh standard icon is slow on Windows - so the model must
+    // hand back the same stored icon, not a new one per call. A new QIcon
+    // gets a new cacheKey, which is what this catches.
+    ArchiveTreeModel model;
+    model.buildFrom({ makeEntry("gerber/top.gbr", EntryClassification::Identical) });
+
+    const QModelIndex folder = model.index(0, 0);
+    const QModelIndex file = model.index(0, 0, folder);
+    const QIcon folderIcon = model.data(folder, Qt::DecorationRole).value<QIcon>();
+    const QIcon fileIcon = model.data(file, Qt::DecorationRole).value<QIcon>();
+
+    QVERIFY(!folderIcon.isNull());
+    QVERIFY(!fileIcon.isNull());
+    QCOMPARE(model.data(folder, Qt::DecorationRole).value<QIcon>().cacheKey(), folderIcon.cacheKey());
+    QCOMPARE(model.data(file, Qt::DecorationRole).value<QIcon>().cacheKey(), fileIcon.cacheKey());
 }
 
 QTEST_MAIN(TestArchiveTreeModel)

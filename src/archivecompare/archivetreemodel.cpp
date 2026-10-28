@@ -26,6 +26,11 @@ QString emptyAfterFilterMessage(const TreeFilter &filter)
 ArchiveTreeModel::ArchiveTreeModel(QObject *parent)
     : QAbstractItemModel(parent)
 {
+    // main.cpp sets the style and stylesheet before any window exists, so
+    // these are the icons the app will show.
+    dirIcon_ = qApp->style()->standardIcon(QStyle::SP_DirIcon);
+    fileIcon_ = qApp->style()->standardIcon(QStyle::SP_FileIcon);
+
     root_ = std::make_unique<ArchiveTreeNode>();
     root_->isDirectory = true;
 }
@@ -229,7 +234,7 @@ QVariant ArchiveTreeModel::data(const QModelIndex &index, int role) const
     case Qt::DisplayRole:
         return node->name;
     case Qt::DecorationRole:
-        return qApp->style()->standardIcon(node->isDirectory ? QStyle::SP_DirIcon : QStyle::SP_FileIcon);
+        return node->isDirectory ? dirIcon_ : fileIcon_;
     case ClassificationRole:
         return QVariant::fromValue(node->classification);
     case IsDirectoryRole:

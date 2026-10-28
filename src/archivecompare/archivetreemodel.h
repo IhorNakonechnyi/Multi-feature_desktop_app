@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractItemModel>
+#include <QIcon>
 
 #include <memory>
 #include <optional>
@@ -89,6 +90,14 @@ private:
     // The unfiltered truth, kept so filters are reversible.
     QVector<ArchiveEntry> allEntries_;
     TreeFilter filter_;
+
+    // Fetched once, in the constructor. The view asks every row for its
+    // icon each time it measures a row (expandAll, resizeColumnToContents,
+    // painting), and on Windows QStyle::standardIcon() goes out to the
+    // shell for a fresh icon on every call with nothing cached - that cost
+    // 4-6 ms per row per walk, seconds per comparison.
+    QIcon dirIcon_;
+    QIcon fileIcon_;
 
     // Builds root_ from allEntries_ under the current filter.
     void rebuild();
