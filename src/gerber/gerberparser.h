@@ -66,6 +66,10 @@ QPainterPath parseContent(const QString &content);
 // both files proves nothing. A file with std::nullopt is never the same
 // data. Used by SameDataCheck.
 //
+// `content` must be valid UTF-16, which QString::fromUtf8 always gives (bad
+// bytes become U+FFFD). The pattern matches inside skip Qt's validity scan
+// for speed, and on broken UTF-16 they could misbehave instead of failing.
+//
 // `refusal` (optional, diagnostics only) is filled with the rule and the
 // statement that made the result std::nullopt.
 //

@@ -19,7 +19,9 @@
 namespace SameDataCheck {
 
 // True when both files are the same kind of layer data (both Gerber, or both
-// Excellon drill) and carry the same data. Two conditions must BOTH hold:
+// Excellon drill) and carry the same data. There are two ways to "same": the
+// fast path described at the end, and the parsing check, for which two
+// conditions must BOTH hold:
 //
 // 1. The parsed objects match (LayerEquivalence::sameObjects - apertures by
 //    shape, order ignored inside each polarity run).
@@ -31,9 +33,9 @@ namespace SameDataCheck {
 //    answer", and if either file holds something the parser cannot vouch
 //    for that way, the pair is never same.
 //
-// Anything unparseable is never "same". Two layers with no objects are the
-// same only when neither file left a draw, flash or hole line out of the
-// text comparison (sameObjectsOrBothEmpty).
+// For the parsing check, anything unparseable is never "same". Two layers with
+// no objects are the same only when neither file left a draw, flash or hole
+// line out of the text comparison (sameObjectsOrBothEmpty).
 //
 // Before the parsing, a fast path (GerberParser::sameStatementsApartFromNoise,
 // ExcellonParser::sameLinesApartFromNoise) answers "same" without parsing when

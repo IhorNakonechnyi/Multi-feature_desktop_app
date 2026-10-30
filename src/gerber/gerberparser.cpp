@@ -1124,8 +1124,11 @@ const QRegularExpression kModalCoordinatesForm(QLatin1Char('^') + coordinateFiel
 // The three patterns above run on almost every statement, so they are the
 // settings pass's main cost. Every match passes this option, which skips Qt's
 // UTF-16 validity scan of the statement and changes no result. Its
-// precondition holds: every caller decodes the file with QString::fromUtf8 or
-// QTextStream, which always produce valid UTF-16 (bad bytes become U+FFFD).
+// precondition holds: these patterns run only inside nonGeometryStatements,
+// whose callers all pass text from QString::fromUtf8 (or plain ASCII), which
+// is always valid UTF-16 - bad bytes become U+FFFD. The statements are cut
+// from it only at ASCII characters, so no character is split in two.
+// gerberparser.h states the precondition where callers see it.
 constexpr auto kNoUtf16Check = QRegularExpression::DontCheckSubjectStringMatchOption;
 
 PlainVerdict classifyOperation(const QString &plain, const QString &view, GeometryWalk &walk);
@@ -1199,7 +1202,8 @@ PlainVerdict classifyOperation(const QString &plain, const QString &view, Geomet
     // Work out the statement's operation (D01/D02/D03), if we can know it.
     int operation = 0;
     QRegularExpressionMatch fields;
-    const QRegularExpressionMatch explicitOp = kOperationForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check);
+    const QRegularExpressionMatch explicitOp
+        = kOperationForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check);
     if (explicitOp.hasMatch()) {
         operation = explicitOp.captured(6).toInt();
         fields = explicitOp;

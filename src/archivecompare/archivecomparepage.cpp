@@ -344,8 +344,9 @@ void ArchiveComparePage::runComparison()
     ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
 
     // A re-exported but unchanged file differs only in its date/user/job
-    // lines, so its CRC differs and it arrives here yellow. Parse each
-    // Gerber/drill pair once and move the ones carrying the same data back to
+    // lines, so its CRC differs and it arrives here yellow. Check each
+    // Gerber/drill pair (parsing it at most once - a plain re-save needs no
+    // parse at all) and move the ones carrying the same data back to
     // green, before anything is shown or counted (samedatacheck.h). Needs
     // whole files, unlike the head-only reads above. Synchronous, like the
     // rest of the compare.
