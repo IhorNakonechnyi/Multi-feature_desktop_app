@@ -1140,19 +1140,31 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         return PlainVerdict::KeepAsText;
     }
 
-    if (kApertureSelectForm.match(plain).hasMatch()) {
+    // The three patterns below run on almost every statement, so they are
+    // the settings pass's main cost. Two savings, neither changes a result:
+    // - DontCheckSubjectStringMatchOption skips Qt's UTF-16 validity scan of
+    //   the statement. Its precondition holds: every caller decodes the file
+    //   with QString::fromUtf8 or QTextStream, which always produce valid
+    //   UTF-16 (bad bytes become U+FFFD).
+    // - The aperture-select pattern is anchored on "(G54)?D", so a statement
+    //   that starts with neither G nor D cannot match it; skip the run.
+    constexpr auto kNoUtf16Check = QRegularExpression::DontCheckSubjectStringMatchOption;
+    const bool mayBeApertureSelect = plain.startsWith(QLatin1Char('D')) || plain.startsWith(QLatin1Char('G'));
+    if (mayBeApertureSelect
+        && kApertureSelectForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check).hasMatch()) {
         return PlainVerdict::Geometry; // does not touch the operation state
     }
 
     // Work out the statement's operation (D01/D02/D03), if we can know it.
     int operation = 0;
     QRegularExpressionMatch fields;
-    const QRegularExpressionMatch explicitOp = kOperationForm.match(plain);
+    const QRegularExpressionMatch explicitOp = kOperationForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check);
     if (explicitOp.hasMatch()) {
         operation = explicitOp.captured(6).toInt();
         fields = explicitOp;
     } else {
-        const QRegularExpressionMatch modal = kModalCoordinatesForm.match(plain);
+        const QRegularExpressionMatch modal
+            = kModalCoordinatesForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check);
         const bool hasAnyField = modal.hasMatch()
             && (modal.hasCaptured(2) || modal.hasCaptured(3) || modal.hasCaptured(4) || modal.hasCaptured(5));
         // With a G prefix the parser looks only for X, Y or D before it
