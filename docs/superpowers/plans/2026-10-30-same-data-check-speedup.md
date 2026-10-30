@@ -12,11 +12,7 @@
 
 ## Where we are (2026-10-30, end of session)
 
-**Next: Igor's real-data run of the final zip** `build-dist/PcbSupplierWorkflow-1.8.9-timing-fixesABC-win64.zip`
-(from `350aeb9`) beside the baseline zip, unplugged, same 4 cases. All 9 tasks are done; an
-extra step between 6 and 7 added the "why the fast path missed" readout. Real-data results
-and the decision to go on with Fixes A–C: spec §7. Still to do after the run: the
-whole-branch review.
+**Plan complete (2026-10-30).** Final real-data run passed: identical fingerprints in all 4 cases. Whole-branch review: no Critical; the timing build was then removed (`b1df31e`) and the review's small points fixed (`7cc62c0`, `4a964ad`). Next: Igor decides the merge to main, and whether Case 2 (~3.6 s check in the normal build) needs Stage 3 (threading).
 
 | Task | State | Commit |
 |---|---|---|
@@ -31,7 +27,8 @@ whole-branch review.
 | 7 Fix A | ✅ done | `96ce87d` |
 | 8 Fix B | ✅ done | `a87194e` |
 | 9 Fix C + final zip | ✅ done (zip named `…-timing-fixesABC-…`, not `…-fastpath-…`, which is the checkpoint-1 zip) | `350aeb9` |
-| — Final real-data run (Igor, unplugged) | ⏭ **next** | — |
+| — Final real-data run (Igor, unplugged) | ✅ passed: fingerprints identical | — |
+| — Whole-branch review + fixes | ✅ done | `b1df31e`, `7cc62c0`, `4a964ad` |
 
 How to resume:
 - Working mode agreed with Igor: one task at a time; after each, build + all tests +
