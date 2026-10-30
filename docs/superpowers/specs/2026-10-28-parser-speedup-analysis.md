@@ -72,7 +72,7 @@ if the settings match — the **full parse** of both, then the **shape compariso
 | Hand-written coordinate recogniser instead of the patterns | Must reproduce subtle rules exactly (12-digit cap, signs, `D001`, G prefix, modal rules); one mismatch breaks "a change is never reported as same". Fix A gets part of the gain at no risk. |
 | Full first-letter `switch` | Check order matters (`%` origin, G prefixes stripped in sequence); Fix B gets most of the gain, since ~96 % of lines start with X/Y. |
 | New byte-level parser | Rewrite of ~1,500 lines of tuned rules; not proportionate. |
-| Faster shape comparison | Only 0–3 % on real data. |
+| Faster shape comparison (incl. counting keys in a hash table instead of sorting) | Only 0–3 % on real data. Revisit if files with many separate pads/tracks show up: there the sort was costly on made-up files. |
 | One pass per file (settings list + shapes in one walk) | Gain smaller than it looks: the strict checks must still run per line. Real-change pairs get slower (shapes always built). Mixes the safety rules into the parser that also draws the overlay. |
 | Keep parsed shapes per file (cache by CRC) | Each file is in one pair only, so a compare repeats nothing. Memory ~15–20 MB per MB of file (Case 2: ~250–340 MB vs 87 MB peak today). Click is already ≤215 ms. |
 | Per-file fingerprint (SHA-256) for parsing on drop | Only useful for threading on drop; the fast path removes most of that work. Revisit with Stage 3 if it happens. |
