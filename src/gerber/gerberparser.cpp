@@ -713,6 +713,99 @@ QPainterPath flattenAndCompositeForLegacyRender(const Layer &layer)
     return result;
 }
 
+// A coordinate command: X..Y..D0n*, or bare coordinates with no D-code,
+// which repeat the modal operation (see ParserState::modalOperationCode).
+// Called by the parse loop for every plain statement that is left once the
+// directives, comments and G-/D-codes have been handled - and directly, from
+// the X/Y lane at the top of the loop, for statements starting with X or Y.
+void applyCoordinateCommand(const QString &text, ParserState &state)
+{
+    const int dIndex = text.lastIndexOf(QLatin1Char('D'));
+    QString coordinatePart;
+    int opCode = -1;
+    if (dIndex >= 0) {
+        coordinatePart = text.left(dIndex);
+        opCode = text.mid(dIndex + 1).toInt();
+        state.modalOperationCode = opCode;
+    } else {
+        // Only actual coordinate data may repeat the modal operation -
+        // anything else that drifted this far (an M02 end-of-file, an
+        // unhandled code) must stay a no-op exactly as before.
+        const bool hasCoordinateData = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
+            || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'));
+        if (!hasCoordinateData || state.modalOperationCode < 0) {
+            return;
+        }
+        coordinatePart = text;
+        opCode = state.modalOperationCode;
+    }
+    const QPointF previousPoint = state.currentPoint;
+    applyCoordinateToken(coordinatePart, state.format, state.currentPoint);
+
+    if (state.insideRegion) {
+        // Region mode collects vertices instead of stroking a pen - the
+        // contour is only turned into a filled polygon once G37 closes
+        // it (see above). The first coordinate statement in a region is
+        // conventionally a D02 move to the contour's starting corner, so
+        // its vertex must be state.currentPoint (the move's destination,
+        // decoded by applyCoordinateToken just above) - NOT
+        // previousPoint, which is wherever the pen was left by whatever
+        // came before the region and only happens to match the
+        // destination when a region starts at the origin. See
+        // regionOpeningMoveStartsFromItsOwnDestination for the
+        // regression this guards against.
+        //
+        // A later D02 finishes the contour so far and starts the next one
+        // at its own destination, the same way. Joining the next contour
+        // onto the last one instead (what the parser once did) drew an
+        // arc that follows the move from the wrong start point - with
+        // the wrong radius, a loop across the board.
+        if (opCode == 2 && !state.regionPoints.isEmpty()) {
+            finishRegionContour(state);
+        }
+        if (state.regionPoints.isEmpty()) {
+            state.regionPoints << state.currentPoint;
+            state.regionEdges << RegionEdge{}; // the start has no edge
+        }
+        if (opCode == 1) {
+            // In G02/G03 mode the edge to this vertex is an arc, read
+            // exactly as an arc draw outside a region is.
+            RegionEdge edge;
+            if (state.interpolationMode != ParserState::InterpolationMode::Linear) {
+                edge.arcCounterClockwise =
+                    state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
+                const std::optional<QPointF> center =
+                    arcCenter(state, coordinatePart, previousPoint, edge.arcCounterClockwise);
+                // No center: the edge is straight, and a straight edge
+                // keeps its center at (0,0).
+                edge.isArc = center.has_value();
+                if (center) {
+                    edge.arcCenter = toNm(*center);
+                } else {
+                    edge.arcCounterClockwise = false;
+                }
+            }
+            state.regionPoints << state.currentPoint;
+            state.regionEdges << edge;
+        }
+    } else if (opCode == 1 && state.interpolationMode != ParserState::InterpolationMode::Linear) {
+        // An arc draw: center from its I/J offsets (see arcCenter).
+        const bool counterClockwise =
+            state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
+        const std::optional<QPointF> center = arcCenter(state, coordinatePart, previousPoint, counterClockwise);
+        if (center) {
+            emitArcStroke(state, previousPoint, state.currentPoint, *center, counterClockwise);
+        } else {
+            emitLinearStroke(state, previousPoint, state.currentPoint);
+        }
+    } else if (opCode == 1) {
+        emitLinearStroke(state, previousPoint, state.currentPoint);
+    } else if (opCode == 3) {
+        emitFlash(state);
+    }
+    // opCode == 2 (move) already updated currentPoint above and draws nothing.
+}
+
 // The real parse: walks the tokenized statements once and records each
 // flash/stroke/region as a GraphicObject, ending with a fully-populated
 // Layer. Structurally identical to the old parseContent's statement loop -
@@ -729,6 +822,26 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
 
     for (int index = 0; index < statements.size(); ++index) {
         const GerberStatement &statement = statements.at(index);
+
+        // The X/Y lane. Almost every statement in a real file is a
+        // coordinate command starting with X or Y, and none of the checks
+        // below can apply to one, so it goes straight to the coordinate
+        // handling:
+        // - tryParseDirective reads only %FS, %MO (parameter statements) and
+        //   G70/G71;
+        // - the %AD/%AM/%SR/%LP and other '%' branches need a parameter
+        //   statement, and this lane takes plain ones only;
+        // - G04, G36, G37, normalizedGCode, G74/G75, G54/G55 and the other
+        //   G-codes all need a leading G, the aperture select a leading D.
+        // A NEW CHECK added below must also be considered for X/Y
+        // statements: if it can apply to one, it must run here too. (The
+        // settings pass has the same lane, see nonGeometryStatements.)
+        if (!statement.isParameterStatement
+            && (statement.text.startsWith(QLatin1Char('X')) || statement.text.startsWith(QLatin1Char('Y')))) {
+            applyCoordinateCommand(statement.text, state);
+            continue;
+        }
+
         // A local copy (not a reference into statement.text) - the
         // G-prefixed-statement handling below needs to strip a leading
         // mode-set token in place before falling through to the
@@ -891,93 +1004,8 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             continue;
         }
 
-        // Anything left is a coordinate command: X..Y..D0n*, or bare
-        // coordinates with no D-code, which repeat the modal operation
-        // (see ParserState::modalOperationCode).
-        const int dIndex = text.lastIndexOf(QLatin1Char('D'));
-        QString coordinatePart;
-        int opCode = -1;
-        if (dIndex >= 0) {
-            coordinatePart = text.left(dIndex);
-            opCode = text.mid(dIndex + 1).toInt();
-            state.modalOperationCode = opCode;
-        } else {
-            // Only actual coordinate data may repeat the modal operation -
-            // anything else that drifted this far (an M02 end-of-file, an
-            // unhandled code) must stay a no-op exactly as before.
-            const bool hasCoordinateData = text.contains(QLatin1Char('X')) || text.contains(QLatin1Char('Y'))
-                || text.contains(QLatin1Char('I')) || text.contains(QLatin1Char('J'));
-            if (!hasCoordinateData || state.modalOperationCode < 0) {
-                continue;
-            }
-            coordinatePart = text;
-            opCode = state.modalOperationCode;
-        }
-        const QPointF previousPoint = state.currentPoint;
-        applyCoordinateToken(coordinatePart, state.format, state.currentPoint);
-
-        if (state.insideRegion) {
-            // Region mode collects vertices instead of stroking a pen - the
-            // contour is only turned into a filled polygon once G37 closes
-            // it (see above). The first coordinate statement in a region is
-            // conventionally a D02 move to the contour's starting corner, so
-            // its vertex must be state.currentPoint (the move's destination,
-            // decoded by applyCoordinateToken just above) - NOT
-            // previousPoint, which is wherever the pen was left by whatever
-            // came before the region and only happens to match the
-            // destination when a region starts at the origin. See
-            // regionOpeningMoveStartsFromItsOwnDestination for the
-            // regression this guards against.
-            //
-            // A later D02 finishes the contour so far and starts the next one
-            // at its own destination, the same way. Joining the next contour
-            // onto the last one instead (what the parser once did) drew an
-            // arc that follows the move from the wrong start point - with
-            // the wrong radius, a loop across the board.
-            if (opCode == 2 && !state.regionPoints.isEmpty()) {
-                finishRegionContour(state);
-            }
-            if (state.regionPoints.isEmpty()) {
-                state.regionPoints << state.currentPoint;
-                state.regionEdges << RegionEdge{}; // the start has no edge
-            }
-            if (opCode == 1) {
-                // In G02/G03 mode the edge to this vertex is an arc, read
-                // exactly as an arc draw outside a region is.
-                RegionEdge edge;
-                if (state.interpolationMode != ParserState::InterpolationMode::Linear) {
-                    edge.arcCounterClockwise =
-                        state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
-                    const std::optional<QPointF> center =
-                        arcCenter(state, coordinatePart, previousPoint, edge.arcCounterClockwise);
-                    // No center: the edge is straight, and a straight edge
-                    // keeps its center at (0,0).
-                    edge.isArc = center.has_value();
-                    if (center) {
-                        edge.arcCenter = toNm(*center);
-                    } else {
-                        edge.arcCounterClockwise = false;
-                    }
-                }
-                state.regionPoints << state.currentPoint;
-                state.regionEdges << edge;
-            }
-        } else if (opCode == 1 && state.interpolationMode != ParserState::InterpolationMode::Linear) {
-            // An arc draw: center from its I/J offsets (see arcCenter).
-            const bool counterClockwise =
-                state.interpolationMode == ParserState::InterpolationMode::CounterClockwiseArc;
-            const std::optional<QPointF> center = arcCenter(state, coordinatePart, previousPoint, counterClockwise);
-            if (center) {
-                emitArcStroke(state, previousPoint, state.currentPoint, *center, counterClockwise);
-            } else {
-                emitLinearStroke(state, previousPoint, state.currentPoint);
-            }
-        } else if (opCode == 1) {
-            emitLinearStroke(state, previousPoint, state.currentPoint);
-        } else if (opCode == 3) {
-            emitFlash(state);
-        }
-        // opCode == 2 (move) already updated currentPoint above and draws nothing.
+        // Anything left is a coordinate command.
+        applyCoordinateCommand(text, state);
     }
 
     // Assemble the Layer from the accumulated parse state. Macros were
@@ -1091,6 +1119,15 @@ const QRegularExpression kOperationForm(QLatin1Char('^') + coordinateFieldsPatte
 // its modal operation for them.
 const QRegularExpression kModalCoordinatesForm(QLatin1Char('^') + coordinateFieldsPattern() + QLatin1Char('$'));
 
+// The three patterns above run on almost every statement, so they are the
+// settings pass's main cost. Every match passes this option, which skips Qt's
+// UTF-16 validity scan of the statement and changes no result. Its
+// precondition holds: every caller decodes the file with QString::fromUtf8 or
+// QTextStream, which always produce valid UTF-16 (bad bytes become U+FFFD).
+constexpr auto kNoUtf16Check = QRegularExpression::DontCheckSubjectStringMatchOption;
+
+PlainVerdict classifyOperation(const QString &plain, const QString &view, GeometryWalk &walk);
+
 // Decides one plain statement (already G-code-normalized, G04 and G91
 // handled by the caller) and updates the walk state the way the parse loop
 // would update its own.
@@ -1140,21 +1177,23 @@ PlainVerdict classifyPlain(const QString &plain, GeometryWalk &walk)
         return PlainVerdict::KeepAsText;
     }
 
-    // The three patterns below run on almost every statement, so they are
-    // the settings pass's main cost. Two savings, neither changes a result:
-    // - DontCheckSubjectStringMatchOption skips Qt's UTF-16 validity scan of
-    //   the statement. Its precondition holds: every caller decodes the file
-    //   with QString::fromUtf8 or QTextStream, which always produce valid
-    //   UTF-16 (bad bytes become U+FFFD).
-    // - The aperture-select pattern is anchored on "(G54)?D", so a statement
-    //   that starts with neither G nor D cannot match it; skip the run.
-    constexpr auto kNoUtf16Check = QRegularExpression::DontCheckSubjectStringMatchOption;
+    // The aperture-select pattern is anchored on "(G54)?D", so a statement
+    // that starts with neither G nor D cannot match it; skip the run.
     const bool mayBeApertureSelect = plain.startsWith(QLatin1Char('D')) || plain.startsWith(QLatin1Char('G'));
     if (mayBeApertureSelect
         && kApertureSelectForm.match(plain, 0, QRegularExpression::NormalMatch, kNoUtf16Check).hasMatch()) {
         return PlainVerdict::Geometry; // does not touch the operation state
     }
 
+    return classifyOperation(plain, view, walk);
+}
+
+// The rest of classifyPlain: the operation rules. view is plain with the
+// G74/G75 and G54/G55 prefixes stripped. The settings pass's X/Y lane calls
+// this directly, with view = plain: a statement starting with X or Y has
+// none of those prefixes, and none of the checks above apply to it.
+PlainVerdict classifyOperation(const QString &plain, const QString &view, GeometryWalk &walk)
+{
     // Work out the statement's operation (D01/D02/D03), if we can know it.
     int operation = 0;
     QRegularExpressionMatch fields;
@@ -1615,10 +1654,20 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         if (plain.contains(QLatin1String("G91"))) {
             return refuse("G91 incremental coordinates", plain);
         }
+        // The X/Y lane, the same as the parse loop's (see
+        // parseContentToObjectsInternal). A statement starting with X or Y
+        // skips the G70/G71 test below and classifyPlain's prefix handling
+        // (G74/G75, G54/G55, G01-G03, G36/G37, aperture select): all of
+        // those need a leading G or D. It goes straight to the operation
+        // rules. The G04 skip and normalizedGCode above change nothing for
+        // it, and the G91 check above, which looks inside the statement, has
+        // run. A NEW CHECK added below must also be considered for X/Y
+        // statements: if it can apply to one, it must run in this lane too.
+        const bool xyStatement = plain.startsWith(QLatin1Char('X')) || plain.startsWith(QLatin1Char('Y'));
         // G70 (inches) / G71 (mm): the old spelling of %MO, read by the
         // parser with the same startsWith test. Same unit rule as %MO; the
         // statement itself is still kept as text below.
-        if (plain.startsWith(QLatin1String("G70")) || plain.startsWith(QLatin1String("G71"))) {
+        if (!xyStatement && (plain.startsWith(QLatin1String("G70")) || plain.startsWith(QLatin1String("G71")))) {
             if (!acceptUnit(plain.startsWith(QLatin1String("G70")))) {
                 return refuse("unit switched after apertures or geometry", plain);
             }
@@ -1626,7 +1675,8 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         // Geometry (a draw, move, flash or aperture select) is left out only
         // in the forms the parser fully reads into objects; everything else
         // (G01/G36/G75/G90/M02, odd coordinate forms ...) is kept in order.
-        switch (classifyPlain(plain, walk)) {
+        const PlainVerdict verdict = xyStatement ? classifyOperation(plain, plain, walk) : classifyPlain(plain, walk);
+        switch (verdict) {
         case PlainVerdict::Geometry:
             apertureOrGeometrySeen = true;
             break;

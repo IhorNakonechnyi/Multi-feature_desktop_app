@@ -460,6 +460,10 @@ void TestSameDataCheck::incrementalCoordinatesAreNeverSameData()
     QVERIFY(!SameDataCheck::isSameDataByParsing(gerber(kExportA + "G91*\n"), gerber(kExportB + "G91*\n")));
     // Chained after another code in one statement.
     QVERIFY(!SameDataCheck::isSameDataByParsing(gerber(kExportA + "G90G91*\n"), gerber(kExportB + "G90G91*\n")));
+    // Chained after coordinates: the statement starts with X, so it takes
+    // the settings pass's X/Y lane, which must still run the G91 check.
+    QVERIFY(!SameDataCheck::isSameDataByParsing(gerber(kExportA + "X100Y100D02G91*\n"),
+                                                gerber(kExportB + "X100Y100D02G91*\n")));
 }
 
 void TestSameDataCheck::incrementalFormatIsNeverSameData()
