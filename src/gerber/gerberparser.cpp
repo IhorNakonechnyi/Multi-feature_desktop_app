@@ -41,60 +41,127 @@ struct GerberStatement {
 // pulled in via gerberparser.h) rather than being re-declared here, since
 // each emitted GraphicObject carries its own polarity.
 
-// `truncated` (optional) is set to true when the scan stops early at an
-// unterminated '%...' block or a last command with no '*' - the text from
-// there on is dropped. The parser ignores that tail, so the same-data check
-// asks for this flag: a dropped tail is a part of the file nobody compared.
+// One statement as the cursor below hands it out: a VIEW into the file text
+// (no copy), trimmed, tagged like GerberStatement.
+struct StatementView {
+    QStringView text;
+    bool isParameterStatement = false;
+};
+
+// Walks the raw text and hands out one statement at a time, without copying
+// any text. It is THE definition of where a statement starts and ends:
+// tokenize() below is built on it, and so is the same-data fast path, so the
+// parser and the fast path can never disagree on the splitting.
+//
+// The views point into `content`, which must outlive the cursor and every
+// view it handed out (the caller's own string - never a temporary).
+//
+// Splitting rules (unchanged from the old tokenize):
+// - whitespace between statements is skipped;
+// - a '%...%' block gives one statement per '*'-separated part, each
+//   trimmed; an empty part (two '*' in a row) is skipped, but a part of only
+//   whitespace gives an EMPTY statement - e.g. the "\n" before a closing '%'
+//   on its own line. The settings pass relies on seeing it;
+// - a plain command runs to its '*', trimmed; an empty one is skipped;
+// - an unterminated block, or a last command with no '*', ends the walk and
+//   sets truncated(): the text from there on is dropped. The parser ignores
+//   that tail, so the same-data check asks for this flag - a dropped tail is
+//   a part of the file nobody compared.
+class StatementCursor
+{
+public:
+    explicit StatementCursor(const QString &content)
+        : content_(content)
+    {
+    }
+
+    // Fills `out` with the next statement and returns true, or returns false
+    // at the end of the text (and on every call after that).
+    bool next(StatementView &out)
+    {
+        for (;;) {
+            if (blockEnd_ >= 0) {
+                // Inside a '%...%' block: hand out its next non-empty part.
+                while (partStart_ < blockEnd_) {
+                    const QStringView rest = QStringView(content_).sliced(partStart_, blockEnd_ - partStart_);
+                    const qsizetype star = rest.indexOf(QLatin1Char('*'));
+                    const qsizetype partLength = star < 0 ? rest.size() : star;
+                    const QStringView part = rest.first(partLength);
+                    partStart_ += partLength + 1;
+                    if (!part.isEmpty()) {
+                        out = {part.trimmed(), true};
+                        return true;
+                    }
+                }
+                position_ = blockEnd_ + 1;
+                blockEnd_ = -1;
+            }
+            // Skip whitespace between statements before deciding what the
+            // next one is. Without this, the scan lands on the newline right
+            // after a block's closing '%' (or after a plain command's '*'),
+            // so the next block's opening '%' would never be recognized as a
+            // block start - it would be swallowed into a bogus plain command
+            // running to the next '*', corrupting every directive after the
+            // first one in the file.
+            while (position_ < content_.size() && content_.at(position_).isSpace()) {
+                ++position_;
+            }
+            if (position_ >= content_.size()) {
+                return false;
+            }
+            if (content_.at(position_) == QLatin1Char('%')) {
+                const qsizetype blockEnd = content_.indexOf(QLatin1Char('%'), position_ + 1);
+                if (blockEnd < 0) {
+                    // Unterminated parameter block: stop. (Whitespace was
+                    // skipped above, so real text is dropped.)
+                    return stopTruncated();
+                }
+                blockEnd_ = blockEnd;
+                partStart_ = position_ + 1;
+                continue;
+            }
+            const qsizetype commandEnd = content_.indexOf(QLatin1Char('*'), position_);
+            if (commandEnd < 0) {
+                return stopTruncated(); // a last command with no '*' is never read
+            }
+            const QStringView command = QStringView(content_).sliced(position_, commandEnd - position_).trimmed();
+            position_ = commandEnd + 1;
+            if (!command.isEmpty()) {
+                out = {command, false};
+                return true;
+            }
+        }
+    }
+
+    bool truncated() const { return truncated_; }
+
+private:
+    bool stopTruncated()
+    {
+        truncated_ = true;
+        position_ = content_.size();
+        return false;
+    }
+
+    const QString &content_;
+    qsizetype position_ = 0;
+    qsizetype blockEnd_ = -1; // the closing '%' of the block being walked, or -1 outside a block
+    qsizetype partStart_ = 0; // where the block's next part starts
+    bool truncated_ = false;
+};
+
+// The whole file as a list of statements (copies), for the two parsers below.
+// `truncated` (optional): see StatementCursor::truncated().
 QVector<GerberStatement> tokenize(const QString &content, bool *truncated = nullptr)
 {
     QVector<GerberStatement> statements;
-    if (truncated) {
-        *truncated = false;
+    StatementCursor cursor(content);
+    StatementView statement;
+    while (cursor.next(statement)) {
+        statements.append({statement.text.toString(), statement.isParameterStatement});
     }
-    int i = 0;
-    while (i < content.length()) {
-        // Skip whitespace between statements before deciding what the next
-        // one is. Without this, the scan pointer lands on the newline right
-        // after a block's closing '%' (or after a plain command's '*'), so
-        // the very next '%...%' block's opening '%' would never be
-        // recognized as a fresh block start - it would instead be swallowed
-        // into a bogus "plain command" run all the way to the next '*',
-        // corrupting every directive after the first one in the file.
-        if (content.at(i).isSpace()) {
-            ++i;
-            continue;
-        }
-        if (content.at(i) == QLatin1Char('%')) {
-            const int blockEnd = content.indexOf(QLatin1Char('%'), i + 1);
-            if (blockEnd < 0) {
-                // malformed - unterminated parameter block, stop parsing.
-                // (Whitespace was skipped above, so real text is dropped.)
-                if (truncated) {
-                    *truncated = true;
-                }
-                break;
-            }
-            const QString block = content.mid(i + 1, blockEnd - i - 1);
-            const QStringList parts = block.split(QLatin1Char('*'), Qt::SkipEmptyParts);
-            for (const QString &part : parts) {
-                statements.append({part.trimmed(), true});
-            }
-            i = blockEnd + 1;
-        } else {
-            const int commandEnd = content.indexOf(QLatin1Char('*'), i);
-            if (commandEnd < 0) {
-                // A last command with no '*': it is never read.
-                if (truncated) {
-                    *truncated = true;
-                }
-                break;
-            }
-            const QString command = content.mid(i, commandEnd - i).trimmed();
-            if (!command.isEmpty()) {
-                statements.append({command, false});
-            }
-            i = commandEnd + 1;
-        }
+    if (truncated) {
+        *truncated = cursor.truncated();
     }
     return statements;
 }
