@@ -5,8 +5,9 @@
 
 // Diagnostics for test rounds on real files: WHY a pair stayed yellow, shown
 // under the overlay canvas. Walks the same steps as SameDataCheck::isSameData and
-// reports where the pair stopped - the rule that refused a file, the first
-// text line that differs, or how the objects differ.
+// reports where the pair stopped - the fast path (same statements apart from
+// noise), the rule that refused a file, the first text line that differs, or
+// how the objects differ.
 //
 // Meant to be pasted into a conversation about real customer files, so it
 // must never show a value: every statement is reduced to its SHAPE (shapeOf)

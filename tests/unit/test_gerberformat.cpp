@@ -21,6 +21,8 @@ private slots:
     void decodeCoordinateMmUnchangedAfterRefactor();
     void decodesNegativeCoordinateToNanometers();
     void decodesZeroCoordinateToNanometers();
+    void viewAndStringDecodeAgree();
+    void oddTokensDecodeToPinnedValues();
 };
 
 void TestGerberFormat::decodesLeadingZeroOmittedInches()
@@ -229,6 +231,65 @@ void TestGerberFormat::decodesZeroCoordinateToNanometers()
     format.unitsAreInches = false;
 
     QCOMPARE(format.decodeCoordinateNm("000000"), qint64(0));
+}
+
+void TestGerberFormat::viewAndStringDecodeAgree()
+{
+    // The parser decodes from views into the statement text (no copy); the
+    // QString versions are what every other test pins. Both must give the
+    // same value for every token, including the odd ones: signs, empty,
+    // too long for the format, and too long for a 64-bit integer (decodes
+    // as 0). Each view is cut from the middle of a longer statement, as
+    // the parser cuts it, so a decoder reading past the view's end would
+    // see the "Y1D01" after it.
+    const QStringList tokens = {"021363", "-021363", "+5", "0", "", "1234567890123", "99999999999999999999"};
+    for (const bool leadingZeroOmitted : {true, false}) {
+        for (const bool inches : {true, false}) {
+            GerberFormat format;
+            format.integerDigits = 2;
+            format.decimalDigits = 4;
+            format.leadingZeroOmitted = leadingZeroOmitted;
+            format.unitsAreInches = inches;
+            for (const QString &token : tokens) {
+                const QString statement = QLatin1Char('X') + token + QLatin1String("Y1D01");
+                const QStringView view = QStringView(statement).mid(1, token.size());
+                const QByteArray where = (token + (leadingZeroOmitted ? " L" : " T") + (inches ? " inch" : " mm"))
+                                             .toUtf8();
+                QVERIFY2(format.decodeCoordinateMm(view) == format.decodeCoordinateMm(token), where.constData());
+                QVERIFY2(format.decodeCoordinateNm(view) == format.decodeCoordinateNm(token), where.constData());
+            }
+        }
+    }
+}
+
+void TestGerberFormat::oddTokensDecodeToPinnedValues()
+{
+    // viewAndStringDecodeAgree only proves the two overloads agree - the
+    // QString one forwards to the view one, so a change to both would pass
+    // it. These values are worked out by hand (format 2.4) and pin the
+    // result itself, for the tokens the other tests don't cover.
+    GerberFormat format;
+    format.integerDigits = 2;
+    format.decimalDigits = 4;
+    format.unitsAreInches = false;
+
+    // Leading zeros omitted: the digits are the right end of the number.
+    format.leadingZeroOmitted = true;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"+5")), qint64(500));      // 0.0005 mm
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"")), qint64(0));          // nothing to read
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"99999999999999999999")),  // too long for 64 bits:
+             qint64(0));                                                      // unreadable reads as 0
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"1234567890123")),        // longer than the format:
+             qint64(123'456'789'012'300));                                    // still read in full
+
+    // Trailing zeros omitted: the digits are the left end, padded to six.
+    format.leadingZeroOmitted = false;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"5")), qint64(50'000'000));   // "500000" = 50 mm
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"-5")), qint64(-50'000'000));
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"")), qint64(0));             // "000000"
+    format.unitsAreInches = true;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"5")), qint64(1'270'000'000)); // 50 inches
+    QVERIFY(qAbs(format.decodeCoordinateMm(QStringView(u"5")) - 1270.0) < 1e-9);
 }
 
 QTEST_MAIN(TestGerberFormat)

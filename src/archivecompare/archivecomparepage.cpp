@@ -1,6 +1,5 @@
 #include "archivecomparepage.h"
 
-#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QCheckBox>
 #include <QComboBox>
@@ -221,33 +220,19 @@ ArchiveComparePage::ArchiveComparePage(QWidget *parent)
     gerberCanvas_ = new CompositeView;
     canvasCardLayout->addWidget(gerberCanvas_);
 
-    // Detail card: the static overlay color legend, one color per line,
-    // with the render time right-aligned on the first line and the compare
-    // time right-aligned on the second (Q7: timing compare and render
-    // separately means a future slowdown can be attributed to the right
-    // half instead of guessed at).
+    // Detail card: the static overlay color legend, one color per line.
+    // The render-time and compare-time labels that used to sit here were
+    // removed: per-stage timing was measured instead in a temporary timing
+    // build, since deleted (docs/superpowers/specs/2026-10-26-stage-timing-
+    // diagnostic-design.md; the code is in git history).
     auto *detailCard = new QWidget;
     detailCard->setObjectName("detailCard");
     detailCard->setAttribute(Qt::WA_StyledBackground, true);
     auto *detailCardLayout = new QVBoxLayout(detailCard);
     detailCardLayout->setContentsMargins(14, 10, 14, 10);
 
-    renderTimeLabel_ = new QLabel(tr("Render time: -"));
-    renderTimeLabel_->setObjectName("detailLabel");
-    auto *firstLine = new QHBoxLayout;
-    firstLine->addWidget(makeColorLegendRow(kColorA, tr("only in A")));
-    firstLine->addStretch();
-    firstLine->addWidget(renderTimeLabel_);
-
-    compareTimeLabel_ = new QLabel(tr("Compare time: -"));
-    compareTimeLabel_->setObjectName("detailLabel");
-    auto *secondLine = new QHBoxLayout;
-    secondLine->addWidget(makeColorLegendRow(kColorB, tr("only in B")));
-    secondLine->addStretch();
-    secondLine->addWidget(compareTimeLabel_);
-
-    detailCardLayout->addLayout(firstLine);
-    detailCardLayout->addLayout(secondLine);
+    detailCardLayout->addWidget(makeColorLegendRow(kColorA, tr("only in A")));
+    detailCardLayout->addWidget(makeColorLegendRow(kColorB, tr("only in B")));
     detailCardLayout->addWidget(makeColorLegendRow(kColorOverlap, tr("same")));
 
 #ifdef PCB_DIAGNOSTICS
@@ -288,7 +273,7 @@ void ArchiveComparePage::runComparison()
 {
     // Cleared unconditionally, before either early return below: a re-pick
     // that turns out empty or unreadable must not leave a previous pair's
-    // stale overlay/layers, render/compare times, or classification trees on
+    // stale overlay/layers or classification trees on
     // screen describing an archive selection that's since changed. The trees
     // in particular are a claim about a comparison - green means "identical in
     // both archives" - so stale coloured rows after a failed re-pick would
@@ -297,7 +282,6 @@ void ArchiveComparePage::runComparison()
     shownLayerA_ = Layer{};
     shownLayerB_ = Layer{};
     gerberCanvas_->setComposite(QImage(), QRectF());
-    compareTimeLabel_->setText(tr("Compare time: -"));
 #ifdef PCB_DIAGNOSTICS
     sameDataLabel_->clear();
     sameDataLabel_->setVisible(false);
@@ -360,13 +344,12 @@ void ArchiveComparePage::runComparison()
     ComparisonSummary::resolveKinds(outcome.result.entriesB, readHeadB);
 
     // A re-exported but unchanged file differs only in its date/user/job
-    // lines, so its CRC differs and it arrives here yellow. Parse each
-    // Gerber/drill pair once and move the ones carrying the same data back to
+    // lines, so its CRC differs and it arrives here yellow. Check each
+    // Gerber/drill pair (parsing it at most once - a plain re-save needs no
+    // parse at all) and move the ones carrying the same data back to
     // green, before anything is shown or counted (samedatacheck.h). Needs
     // whole files, unlike the head-only reads above. Synchronous, like the
-    // rest of the compare - its time is part of the compare time shown.
-    QElapsedTimer sameDataTimer;
-    sameDataTimer.start();
+    // rest of the compare.
     SameDataCheck::collapseSameDataPairs(outcome.result, [this](const DifferingPair &pair) {
 #ifdef PCB_DIAGNOSTICS
         offeredPairs_.insert(pairKey(pair)); // diagnostics: this pair did reach the check
@@ -377,7 +360,6 @@ void ArchiveComparePage::runComparison()
         const QByteArray bytesB = ArchiveReader::readEntryBytes(headerB_->archivePath(), pair.relativePathB, &foundB);
         return foundA && foundB && SameDataCheck::isSameData(bytesA, bytesB);
     });
-    const qint64 sameDataMs = sameDataTimer.elapsed();
 
     const ComparisonSummary::Summary summary = ComparisonSummary::summarize(outcome.result);
     summaryLabel_->setText(ComparisonSummary::formatSummaryLine(summary));
@@ -387,15 +369,12 @@ void ArchiveComparePage::runComparison()
 
     panelA_->showEntries(outcome.result.entriesA);
     panelB_->showEntries(outcome.result.entriesB);
-    // Re-applied over the fresh entries: the bar keeps its state across a
-    // re-pick, so the trees must honour it immediately rather than showing
-    // everything until the user touches a control.
-    applyFilters();
-    // The pipeline just ran to completion, so - unlike renderTimeLabel_
-    // below - this IS the value to show, not a placeholder: rendering only
-    // happens once the user selects a pair, but the compare itself is
-    // already done.
-    compareTimeLabel_->setText(tr("Compare time: %1 ms").arg(outcome.compareMs + sameDataMs));
+    // The bar keeps its state across a re-pick, and so does each panel's
+    // model (ArchiveTreeModel::buildFrom keeps its filter), so the trees
+    // above are already filtered - re-applying the filter here would only
+    // rebuild, expand and re-measure both trees a second time. Only the
+    // empty-pane messages are left to update.
+    updateEmptyMessages(currentFilter());
 
     // Content, not extension, decides which pairs the overlay can draw
     // (Q2/Q12; docs/superpowers/specs/2026-07-27-content-based-drawability-
@@ -409,11 +388,6 @@ void ArchiveComparePage::runComparison()
         gerberPairList_->addItem(formatPairLabel(pair));
     }
     pairStatusLabel_->clear();
-    // Reset to the same placeholder text the constructor starts with,
-    // not a blank label - otherwise a re-comparison after picking new
-    // archives leaves the *previous* pair's stale render time visible in
-    // the Detail card until the user clicks a new pair.
-    renderTimeLabel_->setText(tr("Render time: -"));
 
     updateNotDrawableLabel(buckets.notDrawable.size());
 }
@@ -474,7 +448,7 @@ void ArchiveComparePage::updatePanelWidths()
     panelB_->setFixedWidth(panelWidth);
 }
 
-void ArchiveComparePage::applyFilters()
+TreeFilter ArchiveComparePage::currentFilter() const
 {
     TreeFilter filter;
     filter.changedOnly = onlyChangesCheck_->isChecked();
@@ -482,6 +456,12 @@ void ArchiveComparePage::applyFilters()
     if (kindValue >= 0) {
         filter.kind = static_cast<DataKind>(kindValue);
     }
+    return filter;
+}
+
+void ArchiveComparePage::applyFilters()
+{
+    const TreeFilter filter = currentFilter();
 
     // Both panels, always - one bar means one view of both archives. A bar
     // that silently applied to only one side would make the two trees
@@ -489,6 +469,11 @@ void ArchiveComparePage::applyFilters()
     panelA_->setFilter(filter);
     panelB_->setFilter(filter);
 
+    updateEmptyMessages(filter);
+}
+
+void ArchiveComparePage::updateEmptyMessages(const TreeFilter &filter)
+{
     const QString message = emptyAfterFilterMessage(filter);
     panelA_->showEmptyMessage(panelA_->isEmptyAfterFilter() ? message : QString());
     panelB_->showEmptyMessage(panelB_->isEmptyAfterFilter() ? message : QString());
@@ -628,12 +613,9 @@ void ArchiveComparePage::renderShownPair(const QRectF &windowMm, double pxPerMm)
     if (shownLayerA_.objects.isEmpty() && shownLayerB_.objects.isEmpty()) {
         return;
     }
-    // Synchronous on purpose - the render-time label makes this the
-    // measurement the constitution asks for before any threading work.
-    // Two masks now instead of one: this number is the gate for any future
-    // threading/GL work (design doc section 2).
-    QElapsedTimer timer;
-    timer.start();
+    // Synchronous on purpose: measured on real files, a render takes tens of
+    // milliseconds, far below what would need a thread of its own
+    // (docs/superpowers/specs/2026-10-26-stage-timing-diagnostic-design.md).
     QVector<MaskCompositor::TintedMask> layers;
     if (!shownLayerA_.objects.isEmpty()) {
         layers.append({LayerMaskRenderer::render(shownLayerA_, windowMm, pxPerMm), kColorA});
@@ -642,5 +624,4 @@ void ArchiveComparePage::renderShownPair(const QRectF &windowMm, double pxPerMm)
         layers.append({LayerMaskRenderer::render(shownLayerB_, windowMm, pxPerMm), kColorB});
     }
     gerberCanvas_->setComposite(MaskCompositor::composite(layers), windowMm);
-    renderTimeLabel_->setText(tr("Render time: %1 ms").arg(timer.elapsed()));
 }

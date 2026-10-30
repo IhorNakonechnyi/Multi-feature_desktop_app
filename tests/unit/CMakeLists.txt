@@ -169,6 +169,7 @@ add_executable(test_samedatacheck
     ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatacheck.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatadiagnosis.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectdump.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/layerequivalence.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
@@ -182,6 +183,26 @@ add_executable(test_samedatacheck
 target_include_directories(test_samedatacheck PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_samedatacheck PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME test_samedatacheck COMMAND test_samedatacheck)
+
+# Golden test: pins both parsers' exact output on a fixed made-up corpus, so
+# speed-ups can prove they changed nothing. The expected hashes live in
+# golden/ (see the test file's header for re-recording).
+add_executable(test_parsergolden
+    test_parsergolden.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectdump.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/excellonparser.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectpaths.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberformat.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberaperture.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerbermacro.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberexpression.cpp
+)
+target_include_directories(test_parsergolden PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_parsergolden PRIVATE
+    GOLDEN_FILE="${CMAKE_CURRENT_SOURCE_DIR}/golden/parser-golden.txt")
+target_link_libraries(test_parsergolden PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME test_parsergolden COMMAND test_parsergolden)
 
 # Inspects the BUILT EXECUTABLE, not the source, for any linked networking
 # library - see the test file's own header for why a source grep is not

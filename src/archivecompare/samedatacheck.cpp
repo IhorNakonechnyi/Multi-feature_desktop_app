@@ -24,17 +24,13 @@ bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &lay
     return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
 }
 
-bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytesB)
-{
-    // Content decides the kind, the same way the overlay decides which parser
-    // to use. A Gerber file and a drill file are never the same data.
-    const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
-    if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
-        return false;
-    }
+namespace {
 
-    const QString textA = QString::fromUtf8(bytesA);
-    const QString textB = QString::fromUtf8(bytesB);
+// Conditions 1 and 2 of samedatacheck.h, on text already decoded, for two
+// files of the same drawable kind.
+bool parsingCheck(GerberFileType::Drawability kind, const QString &textA, const QString &textB)
+{
+    using namespace SameDataCheck;
 
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
@@ -66,6 +62,44 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
     } catch (const ExcellonParser::AmbiguousFormatError &) {
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
+}
+
+// The whole check (samedatacheck.h). `tryFastPath` is false only for
+// isSameDataByParsing.
+bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastPath)
+{
+    // Content decides the kind, the same way the overlay decides which parser
+    // to use. A Gerber file and a drill file are never the same data.
+    const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
+    if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
+        return false;
+    }
+
+    const QString textA = QString::fromUtf8(bytesA);
+    const QString textB = QString::fromUtf8(bytesB);
+    if (!tryFastPath) {
+        return parsingCheck(kind, textA, textB);
+    }
+
+    // The fast path: a plain re-save is the same statement for statement
+    // apart from noise, and needs no parse at all. It never says "different",
+    // so anything it cannot prove goes on to the parsing check.
+    const bool sameStatements = kind == GerberFileType::Drawability::Gerber
+        ? GerberParser::sameStatementsApartFromNoise(textA, textB)
+        : ExcellonParser::sameLinesApartFromNoise(textA, textB);
+    return sameStatements || parsingCheck(kind, textA, textB);
+}
+
+} // namespace
+
+bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytesB)
+{
+    return checkPair(bytesA, bytesB, true);
+}
+
+bool SameDataCheck::isSameDataByParsing(const QByteArray &bytesA, const QByteArray &bytesB)
+{
+    return checkPair(bytesA, bytesB, false);
 }
 
 void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const PairPredicate &isSame)

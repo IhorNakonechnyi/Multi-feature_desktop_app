@@ -345,6 +345,63 @@ Layer ExcellonParser::parseContentToObjects(const QString &content)
     return layer;
 }
 
+namespace {
+
+// Hands out the next non-empty trimmed line of `content` from `position` on,
+// as a view - the lines parseContentToObjects reads (split at '\n',
+// trimmed, empty ones skipped), without copying them.
+bool nextLine(const QString &content, qsizetype &position, QStringView &line)
+{
+    while (position <= content.size()) {
+        qsizetype end = content.indexOf(QLatin1Char('\n'), position);
+        if (end < 0) {
+            end = content.size();
+        }
+        line = QStringView(content).sliced(position, end - position).trimmed();
+        position = end + 1;
+        if (!line.isEmpty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A comment the parser reads nothing from: export noise, and no
+// FILE_FORMAT= (tryParseFileFormatComment finds that marker in ANY comment).
+bool isIgnoredNoiseComment(QStringView line)
+{
+    return line.startsWith(QLatin1Char(';')) && !line.contains(QLatin1String("FILE_FORMAT="), Qt::CaseInsensitive)
+        && ExportNoise::isVolatileComment(line.sliced(1).toString());
+}
+
+} // namespace
+
+bool ExcellonParser::sameLinesApartFromNoise(const QString &contentA, const QString &contentB)
+{
+    // fromUtf8 turns every invalid byte into U+FFFD, so two files with
+    // different bad bytes in the same place decode to equal text.
+    const QChar replacement(QChar::ReplacementCharacter);
+    if (contentA.contains(replacement) || contentB.contains(replacement)) {
+        return false;
+    }
+    qsizetype positionA = 0;
+    qsizetype positionB = 0;
+    QStringView a;
+    QStringView b;
+    for (;;) {
+        const bool hasA = nextLine(contentA, positionA, a);
+        const bool hasB = nextLine(contentB, positionB, b);
+        if (!hasA || !hasB) {
+            return !hasA && !hasB;
+        }
+        // Two noise comments need not say the same thing: the parser drops
+        // both, so neither changes a hole.
+        if (a != b && !(isIgnoredNoiseComment(a) && isIgnoredNoiseComment(b))) {
+            return false;
+        }
+    }
+}
+
 std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal,
                                                             bool *drawLeftOut)
 {

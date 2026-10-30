@@ -1,5 +1,7 @@
 # Archive Compare — "Elevated Panels" (1b) Visual Redesign
 
+Note (2026-10-26): the render-time and compare-time labels were removed on branch `multi-threading`; timing lives in the `PCB_TIMING` build (`2026-10-26-stage-timing-diagnostic-design.md`).
+
 Approved by Igor 2026-07-22, after reviewing
 `docs/designUI/updated_design/Qt 6.8 Widgets redesign/design_handoff_1b_dark_theme/`
 (`README.md` + `reference_mockup.dc.html`, direction **1b — Elevated Panels**).

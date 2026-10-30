@@ -17,6 +17,7 @@ class QComboBox;
 class QLabel;
 class QListWidget;
 class QWidget;
+struct TreeFilter;
 
 // The Archive Compare feature page, re-compared automatically whenever
 // either archive changes.
@@ -46,7 +47,9 @@ protected:
 private:
     void runComparison();
     void clearSummary();
+    TreeFilter currentFilter() const;
     void applyFilters();
+    void updateEmptyMessages(const TreeFilter &filter);
 
     // Widens the archive columns as the window grows, so a long filename has
     // more room exactly when there is room to give it.
@@ -74,8 +77,6 @@ private:
     QListWidget *gerberPairList_;
     QLabel *pairStatusLabel_;
     QLabel *notDrawableLabel_;
-    QLabel *renderTimeLabel_;
-    QLabel *compareTimeLabel_;
 #ifdef PCB_DIAGNOSTICS
     // Diagnostic builds only (samedatadiagnosis.h): why the selected pair is
     // yellow, and which pairs the same-data check was offered.

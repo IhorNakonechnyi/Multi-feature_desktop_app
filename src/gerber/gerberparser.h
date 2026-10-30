@@ -66,6 +66,10 @@ QPainterPath parseContent(const QString &content);
 // both files proves nothing. A file with std::nullopt is never the same
 // data. Used by SameDataCheck.
 //
+// `content` must be valid UTF-16, which QString::fromUtf8 always gives (bad
+// bytes become U+FFFD). The pattern matches inside skip Qt's validity scan
+// for speed, and on broken UTF-16 they could misbehave instead of failing.
+//
 // `refusal` (optional, diagnostics only) is filled with the rule and the
 // statement that made the result std::nullopt.
 //
@@ -74,6 +78,22 @@ QPainterPath parseContent(const QString &content);
 // A file with no objects is only "nothing drawn" when this stays false.
 std::optional<QStringList> nonGeometryStatements(const QString &content, SameDataRefusal *refusal = nullptr,
                                                  bool *drawLeftOut = nullptr);
+
+// The same-data check's fast path: true when the two files give the parser
+// the same input. Statement N of one file is paired with statement N of the
+// other; each pair must be equal (text and '%...%' origin), or both must be
+// noise of the same kind that the parser ignores whatever it says - a G04
+// comment, a volatile file attribute of one name (ExportNoise::
+// isVolatileAttribute), %TO, %TD, %LN or %IN. Then the parse, and every
+// reader's view of the image, is the same.
+//
+// False means only "not provable this way" - never "different": an extra
+// comment line, a renumbered aperture or any reordering already gives false,
+// and the full check (nonGeometryStatements + the objects) decides. Also
+// false when either file is cut off mid-statement (the dropped tail was never
+// compared) or contains U+FFFD (two different invalid bytes decode alike).
+// Stops at the first pair that differs.
+bool sameStatementsApartFromNoise(const QString &contentA, const QString &contentB);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an
