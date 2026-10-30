@@ -13,6 +13,7 @@
 
 #include <QSize>
 #include <QString>
+#include <QStringList>
 
 namespace StageTiming {
 
@@ -52,9 +53,16 @@ struct CheckStages {
     // parsing check on every pair, so the two can be compared.
     qint64 fastNs = 0;          // the fast path itself
     int fastHits = 0;           // pairs it proved same
-    qint64 parsingOnHitsNs = 0; // the parsing check on those pairs - what the normal build saves
+    qint64 parsingOnHitsNs = 0; // the parsing check on those pairs, minus its fingerprint hashing - what the normal build saves
     int disagreements = 0;      // fast path "same", parsing check not
     int greensMissed = 0;       // parsing check "same", fast path not
+    // Why the fast path missed those greens (FastPathMiss): how many a fast
+    // path that skips noise would have caught, and one value-free line per
+    // missed pair (the first few). Building them is timed apart, so it can
+    // be left out of the normal-build estimate.
+    int missesSameWithoutNoise = 0;
+    QStringList missLines;
+    qint64 missDetailNs = 0;
 };
 CheckStages &checkStages();
 

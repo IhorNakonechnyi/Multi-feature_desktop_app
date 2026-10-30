@@ -150,10 +150,18 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
                      .arg(qRound64(c.check.parsingOnHitsNs / 1e6))
                      .arg(c.check.disagreements)
                      .arg(c.check.greensMissed)
-              // This build also parses every fast hit and hashes the
-              // fingerprint; the normal build does neither.
-              << QStringLiteral("Check parse in normal build: about ")
-                     + ms(c.checkParseMs - qRound64((c.check.parsingOnHitsNs + c.check.fingerprintNs) / 1e6))
+              << QStringLiteral("Fast path misses on greens: %1, of them same without noise lines: %2 (detail %3 ms)")
+                     .arg(c.check.greensMissed)
+                     .arg(c.check.missesSameWithoutNoise)
+                     .arg(qRound64(c.check.missDetailNs / 1e6));
+        for (const QString &miss : c.check.missLines) {
+            lines << QStringLiteral("  miss: ") + miss;
+        }
+        // This build also parses every fast hit, hashes the fingerprint and
+        // explains the misses; the normal build does none of that.
+        lines << QStringLiteral("Check parse in normal build: about ")
+                + ms(c.checkParseMs
+                     - qRound64((c.check.parsingOnHitsNs + c.check.fingerprintNs + c.check.missDetailNs) / 1e6))
               << QStringLiteral("Check other: ") + ms(checkOther)
               << QStringLiteral("Summary: ") + ms(c.summaryMs)
               << QStringLiteral("Trees build: ") + ms(c.trees.buildMs)
@@ -180,7 +188,7 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
                      .arg(mb(c.privateStartBytes), mb(c.privateAfterCheckBytes), mb(c.memory.privateBytes));
     } else {
         for (const char *name : {"Total", "Until painted", "Zip compare", "File types", "Check reads", "Check parse",
-                                 "Parse split (text/settings/shapes/compare)", "Result fingerprint", "Fast path", "Check parse in normal build", "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
+                                 "Parse split (text/settings/shapes/compare)", "Result fingerprint", "Fast path", "Fast path misses on greens", "Check parse in normal build", "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
                                  "Tree rebuilds", "Overlay classification", "Pair list", "Everything else",
                                  "Parse speed", "Slowest pair", "Pairs", "Archive A", "Archive B",
                                  "Since previous pick", "Memory now/peak", "Peak this run",

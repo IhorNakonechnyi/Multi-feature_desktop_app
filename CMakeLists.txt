@@ -161,7 +161,10 @@ if(PCB_TIMING)
         src/archivecompare/stagetiming.cpp
         # the result fingerprint writes each parsed layer out with it
         src/gerber/gerberobjectdump.h
-        src/gerber/gerberobjectdump.cpp)
+        src/gerber/gerberobjectdump.cpp
+        # the fast-path miss lines show statements as value-free shapes
+        src/archivecompare/samedatadiagnosis.h
+        src/archivecompare/samedatadiagnosis.cpp)
     target_compile_definitions(PcbSupplierWorkflow PRIVATE PCB_TIMING)
     target_link_libraries(PcbSupplierWorkflow PRIVATE psapi)
 endif()

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 
+#include "fastpathmiss.h"
 #include "gerberobjectmodel.h"
 #include "samedatarefusal.h"
 
@@ -73,6 +74,9 @@ std::optional<QStringList> nonGeometryLines(const QString &content, SameDataRefu
 // isVolatileComment) without "FILE_FORMAT=" - the one thing the parser reads
 // from a comment. False means only "not provable this way"; also false when
 // either file contains U+FFFD. Stops at the first pair that differs.
-bool sameLinesApartFromNoise(const QString &contentA, const QString &contentB);
+//
+// `miss` (optional, timing build only): see GerberParser::
+// sameStatementsApartFromNoise.
+bool sameLinesApartFromNoise(const QString &contentA, const QString &contentB, FastPathMiss *miss = nullptr);
 
 } // namespace ExcellonParser

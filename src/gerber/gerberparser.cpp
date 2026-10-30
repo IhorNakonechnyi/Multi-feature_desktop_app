@@ -1636,7 +1636,10 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
     return kept;
 }
 
-bool GerberParser::sameStatementsApartFromNoise(const QString &contentA, const QString &contentB)
+namespace {
+
+// The fast path itself (GerberParser::sameStatementsApartFromNoise).
+bool statementsMatchApartFromNoise(const QString &contentA, const QString &contentB)
 {
     // fromUtf8 turns every invalid byte into U+FFFD, so two files with
     // different bad bytes in the same place decode to equal text.
@@ -1664,6 +1667,102 @@ bool GerberParser::sameStatementsApartFromNoise(const QString &contentA, const Q
             return false;
         }
     }
+}
+
+// Two statements the fast path accepts as a pair: equal, or noise of one kind.
+bool pairMatches(const StatementView &a, const StatementView &b)
+{
+    if (a.isParameterStatement == b.isParameterStatement && a.text == b.text) {
+        return true;
+    }
+    const QStringView kind = noiseKind(a);
+    return !kind.isEmpty() && kind == noiseKind(b);
+}
+
+// A statement as nonGeometryStatements writes it ("%..." for a '%' one), the
+// form SameDataDiagnosis::shapeOf expects.
+QString writtenStatement(const StatementView &statement)
+{
+    return statement.isParameterStatement ? QLatin1Char('%') + statement.text.toString() : statement.text.toString();
+}
+
+// The first pair of `a` and `b` that pairMatches rejects, or the first
+// statement of the longer list once the shorter one has ended. False when
+// there is none.
+bool firstStatementDifference(const QVector<StatementView> &a, const QVector<StatementView> &b, int &position,
+                              QString &statementA, QString &statementB)
+{
+    const qsizetype common = std::min(a.size(), b.size());
+    for (qsizetype i = 0; i < common; ++i) {
+        if (!pairMatches(a.at(i), b.at(i))) {
+            position = static_cast<int>(i + 1);
+            statementA = writtenStatement(a.at(i));
+            statementB = writtenStatement(b.at(i));
+            return true;
+        }
+    }
+    if (a.size() == b.size()) {
+        return false;
+    }
+    position = static_cast<int>(common + 1);
+    statementA = common < a.size() ? writtenStatement(a.at(common)) : QString();
+    statementB = common < b.size() ? writtenStatement(b.at(common)) : QString();
+    return true;
+}
+
+// Why statementsMatchApartFromNoise said no (FastPathMiss). Walks both files
+// in full - diagnostics only, never on the check's own path.
+FastPathMiss describeStatementMiss(const QString &contentA, const QString &contentB)
+{
+    FastPathMiss miss;
+    const QChar replacement(QChar::ReplacementCharacter);
+    if (contentA.contains(replacement) || contentB.contains(replacement)) {
+        miss.reason = FastPathMiss::Reason::InvalidBytes;
+        return miss;
+    }
+    // Views into contentA/contentB, which outlive these lists.
+    const auto collect = [](const QString &content, bool &truncated, QVector<StatementView> &all,
+                            QVector<StatementView> &withoutNoise) {
+        StatementCursor cursor(content);
+        StatementView statement;
+        while (cursor.next(statement)) {
+            all.append(statement);
+            if (noiseKind(statement).isEmpty()) {
+                withoutNoise.append(statement);
+            }
+        }
+        truncated = cursor.truncated();
+    };
+    bool truncatedA = false;
+    bool truncatedB = false;
+    QVector<StatementView> allA;
+    QVector<StatementView> allB;
+    QVector<StatementView> realA;
+    QVector<StatementView> realB;
+    collect(contentA, truncatedA, allA, realA);
+    collect(contentB, truncatedB, allB, realB);
+
+    miss.reason = truncatedA || truncatedB ? FastPathMiss::Reason::CutOff : FastPathMiss::Reason::Differs;
+    miss.countA = static_cast<int>(allA.size());
+    miss.countB = static_cast<int>(allB.size());
+    miss.noiseA = static_cast<int>(allA.size() - realA.size());
+    miss.noiseB = static_cast<int>(allB.size() - realB.size());
+    firstStatementDifference(allA, allB, miss.position, miss.statementA, miss.statementB);
+    const bool differsWithoutNoise =
+        firstStatementDifference(realA, realB, miss.positionWithoutNoise, miss.withoutNoiseA, miss.withoutNoiseB);
+    miss.sameWithoutNoise = !differsWithoutNoise && !truncatedA && !truncatedB;
+    return miss;
+}
+
+} // namespace
+
+bool GerberParser::sameStatementsApartFromNoise(const QString &contentA, const QString &contentB, FastPathMiss *miss)
+{
+    const bool same = statementsMatchApartFromNoise(contentA, contentB);
+    if (miss) {
+        *miss = same ? FastPathMiss{} : describeStatementMiss(contentA, contentB);
+    }
+    return same;
 }
 
 QPainterPath GerberParser::parseFile(const QString &filePath)

@@ -14,7 +14,9 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 
+#include "../gerber/fastpathmiss.h"
 #include "../gerber/gerberobjectdump.h"
+#include "samedatadiagnosis.h"
 #include "stagetiming.h"
 
 namespace {
@@ -58,6 +60,63 @@ void addToFingerprint(const char *kind, bool drawLeftOutA, bool drawLeftOutB, co
     stages.fingerprint = QCryptographicHash::hash(
         stages.fingerprint + QCryptographicHash::hash(text, QCryptographicHash::Sha256), QCryptographicHash::Sha256);
     stages.fingerprintNs += timer.nsecsElapsed();
+}
+
+// For a pair the parsing check found same but the fast path did not: records
+// why the fast path stopped (FastPathMiss) - only counts and value-free
+// shapes (SameDataDiagnosis::shapeOf), never file content.
+void addMissDetail(GerberFileType::Drawability kind, const QString &textA, const QString &textB)
+{
+    QElapsedTimer timer;
+    timer.start();
+    const bool isGerber = kind == GerberFileType::Drawability::Gerber;
+    FastPathMiss miss;
+    if (isGerber) {
+        GerberParser::sameStatementsApartFromNoise(textA, textB, &miss);
+    } else {
+        ExcellonParser::sameLinesApartFromNoise(textA, textB, &miss);
+    }
+    StageTiming::CheckStages &stages = StageTiming::checkStages();
+    if (miss.sameWithoutNoise) {
+        ++stages.missesSameWithoutNoise;
+    }
+    constexpr int kMaxMissLines = 12; // enough to see the pattern, short enough to paste
+    if (stages.missLines.size() < kMaxMissLines) {
+        // shapeOf is made for the settings lists, which never hold a G04, so
+        // a comment is named here (its text is free text - never shown).
+        const auto shape = [isGerber](const QString &statement) {
+            if (statement.isEmpty()) {
+                return QStringLiteral("(file ended)");
+            }
+            if (isGerber && statement.startsWith(QLatin1String("G04"))) {
+                return QStringLiteral("G04 (comment)");
+            }
+            return SameDataDiagnosis::shapeOf(statement, isGerber);
+        };
+        QString line = QStringLiteral("%1, %2/%3 %4 (noise %5/%6)")
+                           .arg(isGerber ? QStringLiteral("gerber") : QStringLiteral("drill"))
+                           .arg(miss.countA)
+                           .arg(miss.countB)
+                           .arg(isGerber ? QStringLiteral("statements") : QStringLiteral("lines"))
+                           .arg(miss.noiseA)
+                           .arg(miss.noiseB);
+        if (miss.reason == FastPathMiss::Reason::InvalidBytes) {
+            line += QStringLiteral(": invalid bytes");
+        } else {
+            if (miss.reason == FastPathMiss::Reason::CutOff) {
+                line += QStringLiteral(", cut off");
+            }
+            line += QStringLiteral("; stopped at #%1: %2 | %3")
+                        .arg(miss.position)
+                        .arg(shape(miss.statementA), shape(miss.statementB));
+            line += miss.sameWithoutNoise ? QStringLiteral("; without noise: same")
+                                          : QStringLiteral("; without noise: #%1: %2 | %3")
+                                                .arg(miss.positionWithoutNoise)
+                                                .arg(shape(miss.withoutNoiseA), shape(miss.withoutNoiseB));
+        }
+        stages.missLines << line;
+    }
+    stages.missDetailNs += timer.nsecsElapsed();
 }
 
 } // namespace
@@ -204,15 +263,19 @@ bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastP
     stages.fastNs += fastTimer.nsecsElapsed();
     QElapsedTimer parsingTimer;
     parsingTimer.start();
+    const qint64 fingerprintBeforeNs = stages.fingerprintNs;
     const bool sameByParsing = parsingCheck(kind, textA, textB);
     if (sameStatements) {
         ++stages.fastHits;
-        stages.parsingOnHitsNs += parsingTimer.nsecsElapsed(); // what the normal build saves
+        // What the normal build saves. The hashing inside parsingCheck is
+        // already in fingerprintNs - count it once, not twice.
+        stages.parsingOnHitsNs += parsingTimer.nsecsElapsed() - (stages.fingerprintNs - fingerprintBeforeNs);
         if (!sameByParsing) {
             ++stages.disagreements;
         }
     } else if (sameByParsing) {
         ++stages.greensMissed;
+        addMissDetail(kind, textA, textB);
     }
     return sameStatements || sameByParsing;
 #else
