@@ -158,7 +158,10 @@ option(PCB_TIMING "Show per-stage timing in Archive Compare (temporary, multi-th
 if(PCB_TIMING)
     target_sources(PcbSupplierWorkflow PRIVATE
         src/archivecompare/stagetiming.h
-        src/archivecompare/stagetiming.cpp)
+        src/archivecompare/stagetiming.cpp
+        # the result fingerprint writes each parsed layer out with it
+        src/gerber/gerberobjectdump.h
+        src/gerber/gerberobjectdump.cpp)
     target_compile_definitions(PcbSupplierWorkflow PRIVATE PCB_TIMING)
     target_link_libraries(PcbSupplierWorkflow PRIVATE psapi)
 endif()

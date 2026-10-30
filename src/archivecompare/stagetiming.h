@@ -42,6 +42,12 @@ struct CheckStages {
     qint64 settingsNs = 0; // the settings pass (nonGeometryStatements/Lines)
     qint64 shapesNs = 0;   // the full parse into shapes
     qint64 compareNs = 0;  // comparing the two shape lists
+    // Result fingerprint: a SHA-256 chained over every checked pair - what
+    // the check produced for it (settings lists, parsed objects) and its
+    // verdict. Equal fingerprints on the same archives = the check gave the
+    // same answers in every detail. A hash says nothing about the files.
+    QByteArray fingerprint;
+    qint64 fingerprintNs = 0; // building it; part of "Check parse", not of the four stages
 };
 CheckStages &checkStages();
 

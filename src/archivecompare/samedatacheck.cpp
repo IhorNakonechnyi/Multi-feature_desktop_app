@@ -11,9 +11,56 @@
 #include "../gerber/gerberparser.h"
 #include "../gerber/layerequivalence.h"
 #ifdef PCB_TIMING // TIMING-DIAG
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 
+#include "../gerber/gerberobjectdump.h"
 #include "stagetiming.h"
+
+namespace {
+
+// Adds one checked pair to the result fingerprint (CheckStages::fingerprint):
+// everything the check produced for it (the settings lists and their
+// left-out flags, the parsed objects), and its verdict. A null pointer is a
+// step that did not run. Timed on its own, so the four stage times stay what
+// they were before the fingerprint existed.
+void addToFingerprint(const char *kind, bool drawLeftOutA, bool drawLeftOutB, const std::optional<QStringList> *restA,
+                      const std::optional<QStringList> *restB, const Layer *layerA, const Layer *layerB,
+                      bool verdict)
+{
+    QElapsedTimer timer;
+    timer.start();
+    QByteArray text = kind;
+    text += drawLeftOutA ? " left-out-a" : "";
+    text += drawLeftOutB ? " left-out-b" : "";
+    // Each list is prefixed with its length, so lines can never slide from
+    // one list into the next and still give the same text.
+    const auto addList = [&text](const std::optional<QStringList> *rest) {
+        if (!rest) {
+            text += "\nsettings not run";
+        } else if (!*rest) {
+            text += "\nsettings refused";
+        } else {
+            text += "\nsettings " + QByteArray::number((*rest)->size()) + '\n'
+                + (*rest)->join(QLatin1Char('\n')).toUtf8();
+        }
+    };
+    const auto addLayer = [&text](const Layer *layer) {
+        text += layer ? "\nobjects\n" + GerberObjectDump::dump(*layer) : QByteArray("\nobjects not parsed");
+    };
+    addList(restA);
+    addList(restB);
+    addLayer(layerA);
+    addLayer(layerB);
+    text += verdict ? "\nsame" : "\nnot same";
+
+    StageTiming::CheckStages &stages = StageTiming::checkStages();
+    stages.fingerprint = QCryptographicHash::hash(
+        stages.fingerprint + QCryptographicHash::hash(text, QCryptographicHash::Sha256), QCryptographicHash::Sha256);
+    stages.fingerprintNs += timer.nsecsElapsed();
+}
+
+} // namespace
 #endif
 
 bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &layerB, bool drawLeftOut)
@@ -35,6 +82,9 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
     // to use. A Gerber file and a drill file are never the same data.
     const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
     if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
+#ifdef PCB_TIMING // TIMING-DIAG
+        addToFingerprint("not comparable", false, false, nullptr, nullptr, nullptr, nullptr, false);
+#endif
         return false;
     }
 
@@ -66,6 +116,9 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         lap(stages.settingsNs);
 #endif
         if (!restA || !restB || *restA != *restB) {
+#ifdef PCB_TIMING // TIMING-DIAG
+            addToFingerprint("gerber", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr, false);
+#endif
             return false;
         }
         const Layer layerA = GerberParser::parseContentToObjects(textA);
@@ -74,6 +127,7 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         lap(stages.shapesNs);
         const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
         lap(stages.compareNs);
+        addToFingerprint("gerber", drawLeftOutA, drawLeftOutB, &restA, &restB, &layerA, &layerB, same);
         return same;
 #else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
@@ -88,6 +142,9 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
     lap(stages.settingsNs);
 #endif
     if (!restA || !restB || *restA != *restB) {
+#ifdef PCB_TIMING // TIMING-DIAG
+        addToFingerprint("drill", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr, false);
+#endif
         return false;
     }
     try {
@@ -97,6 +154,7 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
         lap(stages.shapesNs);
         const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
         lap(stages.compareNs);
+        addToFingerprint("drill", drawLeftOutA, drawLeftOutB, &restA, &restB, &layerA, &layerB, same);
         return same;
 #else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
@@ -104,6 +162,8 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
     } catch (const ExcellonParser::AmbiguousFormatError &) {
 #ifdef PCB_TIMING // TIMING-DIAG
         lap(stages.shapesNs);
+        addToFingerprint("drill, format undecodable", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr,
+                         false);
 #endif
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
