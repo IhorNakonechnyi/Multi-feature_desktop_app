@@ -22,6 +22,7 @@ private slots:
     void decodesNegativeCoordinateToNanometers();
     void decodesZeroCoordinateToNanometers();
     void viewAndStringDecodeAgree();
+    void oddTokensDecodeToPinnedValues();
 };
 
 void TestGerberFormat::decodesLeadingZeroOmittedInches()
@@ -259,6 +260,36 @@ void TestGerberFormat::viewAndStringDecodeAgree()
             }
         }
     }
+}
+
+void TestGerberFormat::oddTokensDecodeToPinnedValues()
+{
+    // viewAndStringDecodeAgree only proves the two overloads agree - the
+    // QString one forwards to the view one, so a change to both would pass
+    // it. These values are worked out by hand (format 2.4) and pin the
+    // result itself, for the tokens the other tests don't cover.
+    GerberFormat format;
+    format.integerDigits = 2;
+    format.decimalDigits = 4;
+    format.unitsAreInches = false;
+
+    // Leading zeros omitted: the digits are the right end of the number.
+    format.leadingZeroOmitted = true;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"+5")), qint64(500));      // 0.0005 mm
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"")), qint64(0));          // nothing to read
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"99999999999999999999")),  // too long for 64 bits:
+             qint64(0));                                                      // unreadable reads as 0
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"1234567890123")),        // longer than the format:
+             qint64(123'456'789'012'300));                                    // still read in full
+
+    // Trailing zeros omitted: the digits are the left end, padded to six.
+    format.leadingZeroOmitted = false;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"5")), qint64(50'000'000));   // "500000" = 50 mm
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"-5")), qint64(-50'000'000));
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"")), qint64(0));             // "000000"
+    format.unitsAreInches = true;
+    QCOMPARE(format.decodeCoordinateNm(QStringView(u"5")), qint64(1'270'000'000)); // 50 inches
+    QVERIFY(qAbs(format.decodeCoordinateMm(QStringView(u"5")) - 1270.0) < 1e-9);
 }
 
 QTEST_MAIN(TestGerberFormat)
