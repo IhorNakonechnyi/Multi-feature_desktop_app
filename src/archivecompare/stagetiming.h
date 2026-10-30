@@ -48,6 +48,13 @@ struct CheckStages {
     // same answers in every detail. A hash says nothing about the files.
     QByteArray fingerprint;
     qint64 fingerprintNs = 0; // building it; part of "Check parse", not of the four stages
+    // The fast path (samedatacheck.cpp). The timing build runs it AND the
+    // parsing check on every pair, so the two can be compared.
+    qint64 fastNs = 0;          // the fast path itself
+    int fastHits = 0;           // pairs it proved same
+    qint64 parsingOnHitsNs = 0; // the parsing check on those pairs - what the normal build saves
+    int disagreements = 0;      // fast path "same", parsing check not
+    int greensMissed = 0;       // parsing check "same", fast path not
 };
 CheckStages &checkStages();
 

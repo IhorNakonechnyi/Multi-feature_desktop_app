@@ -78,21 +78,11 @@ bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &lay
 
 namespace {
 
-// The whole check (samedatacheck.h). `tryFastPath` is false only for
-// isSameDataByParsing.
-bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastPath)
+// Conditions 1 and 2 of samedatacheck.h, on text already decoded, for two
+// files of the same drawable kind.
+bool parsingCheck(GerberFileType::Drawability kind, const QString &textA, const QString &textB)
 {
     using namespace SameDataCheck;
-    // Content decides the kind, the same way the overlay decides which parser
-    // to use. A Gerber file and a drill file are never the same data.
-    const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
-    if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
-#ifdef PCB_TIMING // TIMING-DIAG
-        addToFingerprint("not comparable", false, false, nullptr, nullptr, nullptr, nullptr, false);
-#endif
-        return false;
-    }
-
 #ifdef PCB_TIMING // TIMING-DIAG
     // Adds the time since the last lap to one stage's total.
     QElapsedTimer stageTimer;
@@ -103,23 +93,6 @@ bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastP
         stageTimer.restart();
     };
 #endif
-    const QString textA = QString::fromUtf8(bytesA);
-    const QString textB = QString::fromUtf8(bytesB);
-#ifdef PCB_TIMING // TIMING-DIAG
-    lap(stages.textNs);
-#endif
-
-    // The fast path: a plain re-save is the same statement for statement
-    // apart from noise, and needs no parse at all. It never says "different",
-    // so anything it cannot prove goes on to the parsing check below.
-    if (tryFastPath) {
-        const bool sameStatements = kind == GerberFileType::Drawability::Gerber
-            ? GerberParser::sameStatementsApartFromNoise(textA, textB)
-            : ExcellonParser::sameLinesApartFromNoise(textA, textB);
-        if (sameStatements) {
-            return true;
-        }
-    }
 
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
@@ -184,6 +157,67 @@ bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastP
 #endif
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
+}
+
+// The whole check (samedatacheck.h). `tryFastPath` is false only for
+// isSameDataByParsing.
+bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastPath)
+{
+    // Content decides the kind, the same way the overlay decides which parser
+    // to use. A Gerber file and a drill file are never the same data.
+    const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
+    if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
+#ifdef PCB_TIMING // TIMING-DIAG
+        addToFingerprint("not comparable", false, false, nullptr, nullptr, nullptr, nullptr, false);
+#endif
+        return false;
+    }
+
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer textTimer;
+    textTimer.start();
+#endif
+    const QString textA = QString::fromUtf8(bytesA);
+    const QString textB = QString::fromUtf8(bytesB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    StageTiming::CheckStages &stages = StageTiming::checkStages();
+    stages.textNs += textTimer.nsecsElapsed();
+#endif
+    if (!tryFastPath) {
+        return parsingCheck(kind, textA, textB);
+    }
+
+    // The fast path: a plain re-save is the same statement for statement
+    // apart from noise, and needs no parse at all. It never says "different",
+    // so anything it cannot prove goes on to the parsing check.
+#ifdef PCB_TIMING // TIMING-DIAG
+    QElapsedTimer fastTimer;
+    fastTimer.start();
+#endif
+    const bool sameStatements = kind == GerberFileType::Drawability::Gerber
+        ? GerberParser::sameStatementsApartFromNoise(textA, textB)
+        : ExcellonParser::sameLinesApartFromNoise(textA, textB);
+#ifdef PCB_TIMING // TIMING-DIAG
+    // The timing build runs the parsing check on EVERY pair, fast hit or not,
+    // so the fingerprint still covers all of them and the two paths can be
+    // compared. It returns exactly what the normal build returns.
+    stages.fastNs += fastTimer.nsecsElapsed();
+    QElapsedTimer parsingTimer;
+    parsingTimer.start();
+    const bool sameByParsing = parsingCheck(kind, textA, textB);
+    if (sameStatements) {
+        ++stages.fastHits;
+        stages.parsingOnHitsNs += parsingTimer.nsecsElapsed(); // what the normal build saves
+        if (!sameByParsing) {
+            ++stages.disagreements;
+        }
+    } else if (sameByParsing) {
+        ++stages.greensMissed;
+    }
+    return sameStatements || sameByParsing;
+#else
+    return sameStatements || parsingCheck(kind, textA, textB);
+#endif
 }
 
 } // namespace

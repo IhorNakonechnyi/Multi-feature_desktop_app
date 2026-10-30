@@ -142,6 +142,18 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
                      .arg(c.check.fingerprint.isEmpty() ? dash
                                                         : QString::fromLatin1(c.check.fingerprint.toHex().left(16)))
                      .arg(qRound64(c.check.fingerprintNs / 1e6))
+              << QStringLiteral("Fast path: hits %1 of %2, %3 ms; parsing on hits %4 ms (saved in normal build); "
+                                "disagreements %5; greens missed %6")
+                     .arg(c.check.fastHits)
+                     .arg(c.pairsChecked)
+                     .arg(qRound64(c.check.fastNs / 1e6))
+                     .arg(qRound64(c.check.parsingOnHitsNs / 1e6))
+                     .arg(c.check.disagreements)
+                     .arg(c.check.greensMissed)
+              // This build also parses every fast hit and hashes the
+              // fingerprint; the normal build does neither.
+              << QStringLiteral("Check parse in normal build: about ")
+                     + ms(c.checkParseMs - qRound64((c.check.parsingOnHitsNs + c.check.fingerprintNs) / 1e6))
               << QStringLiteral("Check other: ") + ms(checkOther)
               << QStringLiteral("Summary: ") + ms(c.summaryMs)
               << QStringLiteral("Trees build: ") + ms(c.trees.buildMs)
@@ -168,7 +180,7 @@ QString formatReport(const std::optional<CompareTimes> &compare, const std::opti
                      .arg(mb(c.privateStartBytes), mb(c.privateAfterCheckBytes), mb(c.memory.privateBytes));
     } else {
         for (const char *name : {"Total", "Until painted", "Zip compare", "File types", "Check reads", "Check parse",
-                                 "Parse split (text/settings/shapes/compare)", "Result fingerprint", "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
+                                 "Parse split (text/settings/shapes/compare)", "Result fingerprint", "Fast path", "Check parse in normal build", "Check other", "Summary", "Trees build", "Trees expand", "Trees column width",
                                  "Tree rebuilds", "Overlay classification", "Pair list", "Everything else",
                                  "Parse speed", "Slowest pair", "Pairs", "Archive A", "Archive B",
                                  "Since previous pick", "Memory now/peak", "Peak this run",
