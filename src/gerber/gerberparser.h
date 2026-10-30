@@ -6,7 +6,6 @@
 #include <QString>
 #include <QStringList>
 
-#include "fastpathmiss.h"
 #include "gerberobjectmodel.h"
 #include "samedatarefusal.h"
 
@@ -90,11 +89,7 @@ std::optional<QStringList> nonGeometryStatements(const QString &content, SameDat
 // false when either file is cut off mid-statement (the dropped tail was never
 // compared) or contains U+FFFD (two different invalid bytes decode alike).
 // Stops at the first pair that differs.
-//
-// `miss` (optional, timing build only) is filled with why the answer is false
-// (fastpathmiss.h). That walks both files once more in full, so the check
-// itself never passes it; it does not change the answer.
-bool sameStatementsApartFromNoise(const QString &contentA, const QString &contentB, FastPathMiss *miss = nullptr);
+bool sameStatementsApartFromNoise(const QString &contentA, const QString &contentB);
 
 // Reads filePath and parses it. Returns an empty path if the file can't
 // be read (no exception - an unreadable Gerber file here just means an

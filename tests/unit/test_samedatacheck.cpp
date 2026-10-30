@@ -6,7 +6,6 @@
 #include "archivecompare/samedatadiagnosis.h"
 #include "gerber/excellonparser.h"
 #include "gerber/exportnoise.h"
-#include "gerber/fastpathmiss.h"
 #include "gerber/gerberobjectdump.h"
 #include "gerber/gerberparser.h"
 #include "gerber/layerequivalence.h"
@@ -202,13 +201,6 @@ private slots:
     void drillOrdinaryCommentDifferenceIsNotSame();
     void drillNoiseCommentWithFileFormatIsNotSame();
     void drillMovedHoleIsNotSameByLines();
-
-    // Why the fast path stopped (FastPathMiss; the timing build's readout)
-    void fastPathMissExplainsAnExtraCommentLine();
-    void fastPathMissShowsTheFirstRealDifference();
-    void fastPathMissNamesACutOffFile();
-    void fastPathMissDoesNotChangeTheAnswer();
-    void drillFastPathMissExplainsAnExtraComment();
 
     // The whole check: the fast path first, then the parsing check
     // (SameDataCheck::isSameData). Every test above that calls
@@ -1576,67 +1568,6 @@ void TestSameDataCheck::drillMovedHoleIsNotSameByLines()
 {
     QVERIFY(!sameByLines(drill(kDrillExportA, "T01C0.300\n", "X1.500Y2.250\n"),
                          drill(kDrillExportB, "T01C0.300\n", "X1.600Y2.250\n")));
-}
-
-// --- Why the fast path stopped ---------------------------------------------
-
-void TestSameDataCheck::fastPathMissExplainsAnExtraCommentLine()
-{
-    FastPathMiss miss;
-    QVERIFY(!GerberParser::sameStatementsApartFromNoise(QString::fromUtf8(gerber(kExportA)),
-                                                        QString::fromUtf8(gerber(kExportB + "G04 one more*\n")), &miss));
-    QCOMPARE(miss.reason, FastPathMiss::Reason::Differs);
-    QCOMPARE(miss.countB, miss.countA + 1);
-    QCOMPARE(miss.noiseB, miss.noiseA + 1);
-    QCOMPARE(miss.position, 4); // the three export comments pair up; then G04 meets %FS
-    QCOMPARE(miss.statementA, QString("%FSLAX46Y46"));
-    QCOMPARE(miss.statementB, QString("G04 one more"));
-    QVERIFY(miss.sameWithoutNoise);
-}
-
-void TestSameDataCheck::fastPathMissShowsTheFirstRealDifference()
-{
-    const QString body = "%1*\nX1000000Y1000000D03*\n";
-    FastPathMiss miss;
-    QVERIFY(!GerberParser::sameStatementsApartFromNoise(QString::fromUtf8(gerber(kExportA, body.arg("D10"))),
-                                                        QString::fromUtf8(gerber(kExportB + "G04 x*\n", body.arg("D11"))),
-                                                        &miss));
-    QVERIFY(!miss.sameWithoutNoise);
-    QCOMPARE(miss.withoutNoiseA, QString("D10"));
-    QCOMPARE(miss.withoutNoiseB, QString("D11"));
-    // %FS %MO %ADD10 %ADD11, then the select.
-    QCOMPARE(miss.positionWithoutNoise, 5);
-}
-
-void TestSameDataCheck::fastPathMissNamesACutOffFile()
-{
-    FastPathMiss miss;
-    QVERIFY(!GerberParser::sameStatementsApartFromNoise(QString::fromUtf8(gerber(kExportA) + "%FSLAX"),
-                                                        QString::fromUtf8(gerber(kExportB) + "%FSLAX"), &miss));
-    QCOMPARE(miss.reason, FastPathMiss::Reason::CutOff);
-    QVERIFY(!miss.sameWithoutNoise);
-}
-
-void TestSameDataCheck::fastPathMissDoesNotChangeTheAnswer()
-{
-    FastPathMiss miss;
-    QVERIFY(GerberParser::sameStatementsApartFromNoise(QString::fromUtf8(gerber(kExportA)),
-                                                       QString::fromUtf8(gerber(kExportB)), &miss));
-    QCOMPARE(miss.reason, FastPathMiss::Reason::None);
-    QVERIFY(ExcellonParser::sameLinesApartFromNoise(QString::fromUtf8(drill(kDrillExportA)),
-                                                    QString::fromUtf8(drill(kDrillExportB)), &miss));
-    QCOMPARE(miss.reason, FastPathMiss::Reason::None);
-}
-
-void TestSameDataCheck::drillFastPathMissExplainsAnExtraComment()
-{
-    FastPathMiss miss;
-    QVERIFY(!ExcellonParser::sameLinesApartFromNoise(QString::fromUtf8(drill(kDrillExportA)),
-                                                     QString::fromUtf8(drill(kDrillExportB + ";date: again\n")), &miss));
-    QCOMPARE(miss.reason, FastPathMiss::Reason::Differs);
-    QCOMPARE(miss.countB, miss.countA + 1);
-    QCOMPARE(miss.noiseB, miss.noiseA + 1);
-    QVERIFY(miss.sameWithoutNoise);
 }
 
 // --- The whole check -------------------------------------------------------

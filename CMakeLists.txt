@@ -149,26 +149,6 @@ if(PCB_DIAGNOSTICS)
     target_compile_definitions(PcbSupplierWorkflow PRIVATE PCB_DIAGNOSTICS)
 endif()
 
-# TIMING-DIAG: temporary, multi-threading branch only - delete before merge.
-# A timing build shows, under the overlay legend, how long each stage of
-# Archive Compare took, in a box the user copies out (stage-timing diagnostic
-# design doc), and says so in the window title. Like the diagnostic build,
-# configure it into its own build directory (e.g. build-timing).
-option(PCB_TIMING "Show per-stage timing in Archive Compare (temporary, multi-threading branch)" OFF)
-if(PCB_TIMING)
-    target_sources(PcbSupplierWorkflow PRIVATE
-        src/archivecompare/stagetiming.h
-        src/archivecompare/stagetiming.cpp
-        # the result fingerprint writes each parsed layer out with it
-        src/gerber/gerberobjectdump.h
-        src/gerber/gerberobjectdump.cpp
-        # the fast-path miss lines show statements as value-free shapes
-        src/archivecompare/samedatadiagnosis.h
-        src/archivecompare/samedatadiagnosis.cpp)
-    target_compile_definitions(PcbSupplierWorkflow PRIVATE PCB_TIMING)
-    target_link_libraries(PcbSupplierWorkflow PRIVATE psapi)
-endif()
-
 target_link_libraries(PcbSupplierWorkflow PRIVATE
     Qt6::Core
     Qt6::Gui

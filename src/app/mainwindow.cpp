@@ -58,11 +58,7 @@ MainWindow::MainWindow(QWidget *parent)
     centralLayout->addWidget(pages_, 1); // content: takes all remaining width
 
     setCentralWidget(central);
-#if defined(PCB_DIAGNOSTICS) && defined(PCB_TIMING) // TIMING-DIAG: drop this case before merge
-    setWindowTitle(tr("Diagnostic + timing build %1").arg(QCoreApplication::applicationVersion()));
-#elif defined(PCB_TIMING) // TIMING-DIAG: drop this case before merge
-    setWindowTitle(tr("Timing build %1").arg(QCoreApplication::applicationVersion()));
-#elif defined(PCB_DIAGNOSTICS)
+#ifdef PCB_DIAGNOSTICS
     // A diagnostic build (CMake option PCB_DIAGNOSTICS) carries the same-data
     // diagnostics under the canvas; the title says so, so it is never
     // mistaken for a release. Qt appends the application name itself:

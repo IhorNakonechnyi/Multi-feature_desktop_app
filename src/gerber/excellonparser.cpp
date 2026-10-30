@@ -374,71 +374,9 @@ bool isIgnoredNoiseComment(QStringView line)
         && ExportNoise::isVolatileComment(line.sliced(1).toString());
 }
 
-// The first pair of `a` and `b` that is neither equal nor two ignored noise
-// comments, or the first line of the longer list once the shorter one has
-// ended. False when there is none.
-bool firstLineDifference(const QVector<QStringView> &a, const QVector<QStringView> &b, int &position,
-                         QString &lineA, QString &lineB)
-{
-    const qsizetype common = std::min(a.size(), b.size());
-    for (qsizetype i = 0; i < common; ++i) {
-        if (a.at(i) != b.at(i) && !(isIgnoredNoiseComment(a.at(i)) && isIgnoredNoiseComment(b.at(i)))) {
-            position = static_cast<int>(i + 1);
-            lineA = a.at(i).toString();
-            lineB = b.at(i).toString();
-            return true;
-        }
-    }
-    if (a.size() == b.size()) {
-        return false;
-    }
-    position = static_cast<int>(common + 1);
-    lineA = common < a.size() ? a.at(common).toString() : QString();
-    lineB = common < b.size() ? b.at(common).toString() : QString();
-    return true;
-}
+} // namespace
 
-// Why the fast path said no (FastPathMiss). Walks both files in full -
-// diagnostics only, never on the check's own path.
-FastPathMiss describeLineMiss(const QString &contentA, const QString &contentB)
-{
-    FastPathMiss miss;
-    const QChar replacement(QChar::ReplacementCharacter);
-    if (contentA.contains(replacement) || contentB.contains(replacement)) {
-        miss.reason = FastPathMiss::Reason::InvalidBytes;
-        return miss;
-    }
-    // Views into contentA/contentB, which outlive these lists.
-    const auto collect = [](const QString &content, QVector<QStringView> &all, QVector<QStringView> &withoutNoise) {
-        qsizetype position = 0;
-        QStringView line;
-        while (nextLine(content, position, line)) {
-            all.append(line);
-            if (!isIgnoredNoiseComment(line)) {
-                withoutNoise.append(line);
-            }
-        }
-    };
-    QVector<QStringView> allA;
-    QVector<QStringView> allB;
-    QVector<QStringView> realA;
-    QVector<QStringView> realB;
-    collect(contentA, allA, realA);
-    collect(contentB, allB, realB);
-
-    miss.reason = FastPathMiss::Reason::Differs;
-    miss.countA = static_cast<int>(allA.size());
-    miss.countB = static_cast<int>(allB.size());
-    miss.noiseA = static_cast<int>(allA.size() - realA.size());
-    miss.noiseB = static_cast<int>(allB.size() - realB.size());
-    firstLineDifference(allA, allB, miss.position, miss.statementA, miss.statementB);
-    miss.sameWithoutNoise =
-        !firstLineDifference(realA, realB, miss.positionWithoutNoise, miss.withoutNoiseA, miss.withoutNoiseB);
-    return miss;
-}
-
-// The fast path itself (ExcellonParser::sameLinesApartFromNoise).
-bool linesMatchApartFromNoise(const QString &contentA, const QString &contentB)
+bool ExcellonParser::sameLinesApartFromNoise(const QString &contentA, const QString &contentB)
 {
     // fromUtf8 turns every invalid byte into U+FFFD, so two files with
     // different bad bytes in the same place decode to equal text.
@@ -462,17 +400,6 @@ bool linesMatchApartFromNoise(const QString &contentA, const QString &contentB)
             return false;
         }
     }
-}
-
-} // namespace
-
-bool ExcellonParser::sameLinesApartFromNoise(const QString &contentA, const QString &contentB, FastPathMiss *miss)
-{
-    const bool same = linesMatchApartFromNoise(contentA, contentB);
-    if (miss) {
-        *miss = same ? FastPathMiss{} : describeLineMiss(contentA, contentB);
-    }
-    return same;
 }
 
 std::optional<QStringList> ExcellonParser::nonGeometryLines(const QString &content, SameDataRefusal *refusal,

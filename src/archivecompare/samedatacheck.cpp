@@ -10,117 +10,6 @@
 #include "../gerber/gerberfiletype.h"
 #include "../gerber/gerberparser.h"
 #include "../gerber/layerequivalence.h"
-#ifdef PCB_TIMING // TIMING-DIAG
-#include <QCryptographicHash>
-#include <QElapsedTimer>
-
-#include "../gerber/fastpathmiss.h"
-#include "../gerber/gerberobjectdump.h"
-#include "samedatadiagnosis.h"
-#include "stagetiming.h"
-
-namespace {
-
-// Adds one checked pair to the result fingerprint (CheckStages::fingerprint):
-// everything the check produced for it (the settings lists and their
-// left-out flags, the parsed objects), and its verdict. A null pointer is a
-// step that did not run. Timed on its own, so the four stage times stay what
-// they were before the fingerprint existed.
-void addToFingerprint(const char *kind, bool drawLeftOutA, bool drawLeftOutB, const std::optional<QStringList> *restA,
-                      const std::optional<QStringList> *restB, const Layer *layerA, const Layer *layerB,
-                      bool verdict)
-{
-    QElapsedTimer timer;
-    timer.start();
-    QByteArray text = kind;
-    text += drawLeftOutA ? " left-out-a" : "";
-    text += drawLeftOutB ? " left-out-b" : "";
-    // Each list is prefixed with its length, so lines can never slide from
-    // one list into the next and still give the same text.
-    const auto addList = [&text](const std::optional<QStringList> *rest) {
-        if (!rest) {
-            text += "\nsettings not run";
-        } else if (!*rest) {
-            text += "\nsettings refused";
-        } else {
-            text += "\nsettings " + QByteArray::number((*rest)->size()) + '\n'
-                + (*rest)->join(QLatin1Char('\n')).toUtf8();
-        }
-    };
-    const auto addLayer = [&text](const Layer *layer) {
-        text += layer ? "\nobjects\n" + GerberObjectDump::dump(*layer) : QByteArray("\nobjects not parsed");
-    };
-    addList(restA);
-    addList(restB);
-    addLayer(layerA);
-    addLayer(layerB);
-    text += verdict ? "\nsame" : "\nnot same";
-
-    StageTiming::CheckStages &stages = StageTiming::checkStages();
-    stages.fingerprint = QCryptographicHash::hash(
-        stages.fingerprint + QCryptographicHash::hash(text, QCryptographicHash::Sha256), QCryptographicHash::Sha256);
-    stages.fingerprintNs += timer.nsecsElapsed();
-}
-
-// For a pair the parsing check found same but the fast path did not: records
-// why the fast path stopped (FastPathMiss) - only counts and value-free
-// shapes (SameDataDiagnosis::shapeOf), never file content.
-void addMissDetail(GerberFileType::Drawability kind, const QString &textA, const QString &textB)
-{
-    QElapsedTimer timer;
-    timer.start();
-    const bool isGerber = kind == GerberFileType::Drawability::Gerber;
-    FastPathMiss miss;
-    if (isGerber) {
-        GerberParser::sameStatementsApartFromNoise(textA, textB, &miss);
-    } else {
-        ExcellonParser::sameLinesApartFromNoise(textA, textB, &miss);
-    }
-    StageTiming::CheckStages &stages = StageTiming::checkStages();
-    if (miss.sameWithoutNoise) {
-        ++stages.missesSameWithoutNoise;
-    }
-    constexpr int kMaxMissLines = 12; // enough to see the pattern, short enough to paste
-    if (stages.missLines.size() < kMaxMissLines) {
-        // shapeOf is made for the settings lists, which never hold a G04, so
-        // a comment is named here (its text is free text - never shown).
-        const auto shape = [isGerber](const QString &statement) {
-            if (statement.isEmpty()) {
-                return QStringLiteral("(file ended)");
-            }
-            if (isGerber && statement.startsWith(QLatin1String("G04"))) {
-                return QStringLiteral("G04 (comment)");
-            }
-            return SameDataDiagnosis::shapeOf(statement, isGerber);
-        };
-        QString line = QStringLiteral("%1, %2/%3 %4 (noise %5/%6)")
-                           .arg(isGerber ? QStringLiteral("gerber") : QStringLiteral("drill"))
-                           .arg(miss.countA)
-                           .arg(miss.countB)
-                           .arg(isGerber ? QStringLiteral("statements") : QStringLiteral("lines"))
-                           .arg(miss.noiseA)
-                           .arg(miss.noiseB);
-        if (miss.reason == FastPathMiss::Reason::InvalidBytes) {
-            line += QStringLiteral(": invalid bytes");
-        } else {
-            if (miss.reason == FastPathMiss::Reason::CutOff) {
-                line += QStringLiteral(", cut off");
-            }
-            line += QStringLiteral("; stopped at #%1: %2 | %3")
-                        .arg(miss.position)
-                        .arg(shape(miss.statementA), shape(miss.statementB));
-            line += miss.sameWithoutNoise ? QStringLiteral("; without noise: same")
-                                          : QStringLiteral("; without noise: #%1: %2 | %3")
-                                                .arg(miss.positionWithoutNoise)
-                                                .arg(shape(miss.withoutNoiseA), shape(miss.withoutNoiseB));
-        }
-        stages.missLines << line;
-    }
-    stages.missDetailNs += timer.nsecsElapsed();
-}
-
-} // namespace
-#endif
 
 bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &layerB, bool drawLeftOut)
 {
@@ -142,16 +31,6 @@ namespace {
 bool parsingCheck(GerberFileType::Drawability kind, const QString &textA, const QString &textB)
 {
     using namespace SameDataCheck;
-#ifdef PCB_TIMING // TIMING-DIAG
-    // Adds the time since the last lap to one stage's total.
-    QElapsedTimer stageTimer;
-    stageTimer.start();
-    StageTiming::CheckStages &stages = StageTiming::checkStages();
-    const auto lap = [&stageTimer](qint64 &stageNs) {
-        stageNs += stageTimer.nsecsElapsed();
-        stageTimer.restart();
-    };
-#endif
 
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
@@ -161,59 +40,26 @@ bool parsingCheck(GerberFileType::Drawability kind, const QString &textA, const 
         bool drawLeftOutB = false;
         const auto restA = GerberParser::nonGeometryStatements(textA, nullptr, &drawLeftOutA);
         const auto restB = GerberParser::nonGeometryStatements(textB, nullptr, &drawLeftOutB);
-#ifdef PCB_TIMING // TIMING-DIAG
-        lap(stages.settingsNs);
-#endif
         if (!restA || !restB || *restA != *restB) {
-#ifdef PCB_TIMING // TIMING-DIAG
-            addToFingerprint("gerber", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr, false);
-#endif
             return false;
         }
         const Layer layerA = GerberParser::parseContentToObjects(textA);
         const Layer layerB = GerberParser::parseContentToObjects(textB);
-#ifdef PCB_TIMING // TIMING-DIAG
-        lap(stages.shapesNs);
-        const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
-        lap(stages.compareNs);
-        addToFingerprint("gerber", drawLeftOutA, drawLeftOutB, &restA, &restB, &layerA, &layerB, same);
-        return same;
-#else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
-#endif
     }
 
     bool drawLeftOutA = false;
     bool drawLeftOutB = false;
     const auto restA = ExcellonParser::nonGeometryLines(textA, nullptr, &drawLeftOutA);
     const auto restB = ExcellonParser::nonGeometryLines(textB, nullptr, &drawLeftOutB);
-#ifdef PCB_TIMING // TIMING-DIAG
-    lap(stages.settingsNs);
-#endif
     if (!restA || !restB || *restA != *restB) {
-#ifdef PCB_TIMING // TIMING-DIAG
-        addToFingerprint("drill", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr, false);
-#endif
         return false;
     }
     try {
         const Layer layerA = ExcellonParser::parseContentToObjects(textA);
         const Layer layerB = ExcellonParser::parseContentToObjects(textB);
-#ifdef PCB_TIMING // TIMING-DIAG
-        lap(stages.shapesNs);
-        const bool same = sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
-        lap(stages.compareNs);
-        addToFingerprint("drill", drawLeftOutA, drawLeftOutB, &restA, &restB, &layerA, &layerB, same);
-        return same;
-#else
         return sameObjectsOrBothEmpty(layerA, layerB, drawLeftOutA || drawLeftOutB);
-#endif
     } catch (const ExcellonParser::AmbiguousFormatError &) {
-#ifdef PCB_TIMING // TIMING-DIAG
-        lap(stages.shapesNs);
-        addToFingerprint("drill, format undecodable", drawLeftOutA, drawLeftOutB, &restA, &restB, nullptr, nullptr,
-                         false);
-#endif
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
 }
@@ -226,22 +72,11 @@ bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastP
     // to use. A Gerber file and a drill file are never the same data.
     const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
     if (kind == GerberFileType::Drawability::NotDrawable || GerberFileType::classify(bytesB) != kind) {
-#ifdef PCB_TIMING // TIMING-DIAG
-        addToFingerprint("not comparable", false, false, nullptr, nullptr, nullptr, nullptr, false);
-#endif
         return false;
     }
 
-#ifdef PCB_TIMING // TIMING-DIAG
-    QElapsedTimer textTimer;
-    textTimer.start();
-#endif
     const QString textA = QString::fromUtf8(bytesA);
     const QString textB = QString::fromUtf8(bytesB);
-#ifdef PCB_TIMING // TIMING-DIAG
-    StageTiming::CheckStages &stages = StageTiming::checkStages();
-    stages.textNs += textTimer.nsecsElapsed();
-#endif
     if (!tryFastPath) {
         return parsingCheck(kind, textA, textB);
     }
@@ -249,38 +84,10 @@ bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastP
     // The fast path: a plain re-save is the same statement for statement
     // apart from noise, and needs no parse at all. It never says "different",
     // so anything it cannot prove goes on to the parsing check.
-#ifdef PCB_TIMING // TIMING-DIAG
-    QElapsedTimer fastTimer;
-    fastTimer.start();
-#endif
     const bool sameStatements = kind == GerberFileType::Drawability::Gerber
         ? GerberParser::sameStatementsApartFromNoise(textA, textB)
         : ExcellonParser::sameLinesApartFromNoise(textA, textB);
-#ifdef PCB_TIMING // TIMING-DIAG
-    // The timing build runs the parsing check on EVERY pair, fast hit or not,
-    // so the fingerprint still covers all of them and the two paths can be
-    // compared. It returns exactly what the normal build returns.
-    stages.fastNs += fastTimer.nsecsElapsed();
-    QElapsedTimer parsingTimer;
-    parsingTimer.start();
-    const qint64 fingerprintBeforeNs = stages.fingerprintNs;
-    const bool sameByParsing = parsingCheck(kind, textA, textB);
-    if (sameStatements) {
-        ++stages.fastHits;
-        // What the normal build saves. The hashing inside parsingCheck is
-        // already in fingerprintNs - count it once, not twice.
-        stages.parsingOnHitsNs += parsingTimer.nsecsElapsed() - (stages.fingerprintNs - fingerprintBeforeNs);
-        if (!sameByParsing) {
-            ++stages.disagreements;
-        }
-    } else if (sameByParsing) {
-        ++stages.greensMissed;
-        addMissDetail(kind, textA, textB);
-    }
-    return sameStatements || sameByParsing;
-#else
     return sameStatements || parsingCheck(kind, textA, textB);
-#endif
 }
 
 } // namespace
