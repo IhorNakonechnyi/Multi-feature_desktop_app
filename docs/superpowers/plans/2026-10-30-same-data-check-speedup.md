@@ -12,9 +12,11 @@
 
 ## Where we are (2026-10-30, end of session)
 
-**Next: Task 7 (Fix A).** Tasks 1–6 are done; an extra step between 6 and 7 added the
-"why the fast path missed" readout. Real-data results and the decision to go on with
-Fixes A–C: spec §7.
+**Next: Igor's real-data run of the final zip** `build-dist/PcbSupplierWorkflow-1.8.9-timing-fixesABC-win64.zip`
+(from `350aeb9`) beside the baseline zip, unplugged, same 4 cases. All 9 tasks are done; an
+extra step between 6 and 7 added the "why the fast path missed" readout. Real-data results
+and the decision to go on with Fixes A–C: spec §7. Still to do after the run: the
+whole-branch review.
 
 | Task | State | Commit |
 |---|---|---|
@@ -26,9 +28,10 @@ Fixes A–C: spec §7.
 | 6 Fast-path counters | ✅ done | `015cd74` |
 | 6½ Why-missed readout + estimate fix (not in the original plan) | ✅ done | `18f04b0` |
 | — Real-data checkpoints 1 and 2 (Igor, unplugged) | ✅ done: fingerprints identical; spec §7 | — |
-| 7 Fix A | ⏭ **next** | |
-| 8 Fix B | to do | |
-| 9 Fix C + final zip | to do | |
+| 7 Fix A | ✅ done | `96ce87d` |
+| 8 Fix B | ✅ done | `a87194e` |
+| 9 Fix C + final zip | ✅ done (zip named `…-timing-fixesABC-…`, not `…-fastpath-…`, which is the checkpoint-1 zip) | `350aeb9` |
+| — Final real-data run (Igor, unplugged) | ⏭ **next** | — |
 
 How to resume:
 - Working mode agreed with Igor: one task at a time; after each, build + all tests +
