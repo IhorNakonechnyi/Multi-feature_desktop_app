@@ -1,7 +1,8 @@
 # Stage 2: speeding up the same-data check — analysis
 
-**Status**: **Analysis only, nothing decided.** Branch `multi-threading`. Rewritten
-2026-10-30 after a second analysis round. Context:
+**Status**: **Decided 2026-10-30; being implemented** on branch `multi-threading` per
+[the plan](../plans/2026-10-30-same-data-check-speedup.md) - the fast path is live from
+Task 5. Rewritten 2026-10-30 after a second analysis round. Context:
 [idea_multi-threading.md](idea_multi-threading.md),
 [2026-10-26-stage-timing-diagnostic-design.md](2026-10-26-stage-timing-diagnostic-design.md).
 
@@ -56,8 +57,10 @@ if the settings match — the **full parse** of both, then the **shape compariso
   disagreements (fast "same" where today's check says not same).
 - The fast path may give a few more greens than today: files identical apart from noise but
   using a feature the parser refuses (`G91`, non-absolute `%FS`, a misread `%SR`, an unknown
-  directive, a cut-off file, an empty layer). Identical input is the same data whether or not
-  the parser understands it. Those cases are the only expected disagreements.
+  directive, an empty layer). Identical input is the same data whether or not the parser
+  understands it. Those cases are the only expected disagreements. **Not** a cut-off file
+  (corrected while planning): the splitter drops a cut-off tail unread, so the fast path
+  cannot compare it and passes the pair on.
 - Noise = exactly what today's check already ignores, and a differing pair must be noise of
   the *same kind* on both sides. Gerber: any `G04`; `ExportNoise::isVolatileAttribute`
   (`.CreationDate`, `.GenerationSoftware`, `.ProjectId`, `.MD5`, `.SameCoordinates`);

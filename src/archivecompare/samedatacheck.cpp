@@ -76,8 +76,13 @@ bool SameDataCheck::sameObjectsOrBothEmpty(const Layer &layerA, const Layer &lay
     return !layerA.objects.isEmpty() && LayerEquivalence::sameObjects(layerA, layerB);
 }
 
-bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytesB)
+namespace {
+
+// The whole check (samedatacheck.h). `tryFastPath` is false only for
+// isSameDataByParsing.
+bool checkPair(const QByteArray &bytesA, const QByteArray &bytesB, bool tryFastPath)
 {
+    using namespace SameDataCheck;
     // Content decides the kind, the same way the overlay decides which parser
     // to use. A Gerber file and a drill file are never the same data.
     const GerberFileType::Drawability kind = GerberFileType::classify(bytesA);
@@ -103,6 +108,18 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
 #ifdef PCB_TIMING // TIMING-DIAG
     lap(stages.textNs);
 #endif
+
+    // The fast path: a plain re-save is the same statement for statement
+    // apart from noise, and needs no parse at all. It never says "different",
+    // so anything it cannot prove goes on to the parsing check below.
+    if (tryFastPath) {
+        const bool sameStatements = kind == GerberFileType::Drawability::Gerber
+            ? GerberParser::sameStatementsApartFromNoise(textA, textB)
+            : ExcellonParser::sameLinesApartFromNoise(textA, textB);
+        if (sameStatements) {
+            return true;
+        }
+    }
 
     if (kind == GerberFileType::Drawability::Gerber) {
         // The cheaper test first: on a real change the non-geometry lines
@@ -167,6 +184,18 @@ bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytes
 #endif
         return false; // the coordinates can't be decoded, so nothing can be claimed
     }
+}
+
+} // namespace
+
+bool SameDataCheck::isSameData(const QByteArray &bytesA, const QByteArray &bytesB)
+{
+    return checkPair(bytesA, bytesB, true);
+}
+
+bool SameDataCheck::isSameDataByParsing(const QByteArray &bytesA, const QByteArray &bytesB)
+{
+    return checkPair(bytesA, bytesB, false);
 }
 
 void SameDataCheck::collapseSameDataPairs(ArchiveComparisonResult &result, const PairPredicate &isSame)

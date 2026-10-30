@@ -34,7 +34,19 @@ namespace SameDataCheck {
 // Anything unparseable is never "same". Two layers with no objects are the
 // same only when neither file left a draw, flash or hole line out of the
 // text comparison (sameObjectsOrBothEmpty).
+//
+// Before the parsing, a fast path (GerberParser::sameStatementsApartFromNoise,
+// ExcellonParser::sameLinesApartFromNoise) answers "same" without parsing when
+// both files are the same statement for statement apart from noise the parser
+// ignores - the usual plain re-save. Then the parser gets the same input, so
+// that is the same data even for a file the parsing check would refuse.
+// When the fast path cannot prove it, isSameDataByParsing decides.
 bool isSameData(const QByteArray &bytesA, const QByteArray &bytesB);
+
+// The check above WITHOUT the fast path: the kind test, then conditions 1 and
+// 2. isSameData uses it for every pair the fast path passes on; the tests
+// use it to pin the parsing rules on their own.
+bool isSameDataByParsing(const QByteArray &bytesA, const QByteArray &bytesB);
 
 // Step 1 of the rule above, shared with SameDataDiagnosis so the two always
 // agree. `drawLeftOut`: either file left a draw, flash or hole line out of

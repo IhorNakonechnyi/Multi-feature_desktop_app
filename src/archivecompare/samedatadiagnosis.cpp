@@ -316,6 +316,12 @@ QString SameDataDiagnosis::explain(const QByteArray &bytesA, const QByteArray &b
     const QString textA = QString::fromUtf8(bytesA);
     const QString textB = QString::fromUtf8(bytesB);
 
+    // Step 0: the fast path, exactly as isSameData tries it first.
+    if (isGerber ? GerberParser::sameStatementsApartFromNoise(textA, textB)
+                 : ExcellonParser::sameLinesApartFromNoise(textA, textB)) {
+        return QStringLiteral("Same-data check: same statements apart from comments and export labels - same data");
+    }
+
     // Step 1 and 2: the non-geometry lists, exactly as isSameData builds them.
     SameDataRefusal refusalA;
     SameDataRefusal refusalB;
