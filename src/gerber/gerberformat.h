@@ -24,6 +24,9 @@ struct GerberFormat {
     // millimeters, honoring the digit counts/zero-suppression mode and
     // converting from inches if needed.
     double decodeCoordinateMm(const QString &token) const;
+    // The same from a view into a longer text, without copying the digits
+    // out first - the parser decodes every coordinate this way.
+    double decodeCoordinateMm(QStringView token) const;
 
     // Same as decodeCoordinateMm, but decodes straight to integer
     // nanometers via integer arithmetic instead of a double division -
@@ -33,6 +36,7 @@ struct GerberFormat {
     // foundation for the upcoming integer-coordinate object model, which
     // will replace the current float-based QPainterPath pipeline.
     qint64 decodeCoordinateNm(const QString &token) const;
+    qint64 decodeCoordinateNm(QStringView token) const;
 
     // Converts a millimeter value (as already produced by
     // decodeCoordinateMm, or any other mm-space value in this app) to

@@ -21,6 +21,7 @@ private slots:
     void decodeCoordinateMmUnchangedAfterRefactor();
     void decodesNegativeCoordinateToNanometers();
     void decodesZeroCoordinateToNanometers();
+    void viewAndStringDecodeAgree();
 };
 
 void TestGerberFormat::decodesLeadingZeroOmittedInches()
@@ -229,6 +230,35 @@ void TestGerberFormat::decodesZeroCoordinateToNanometers()
     format.unitsAreInches = false;
 
     QCOMPARE(format.decodeCoordinateNm("000000"), qint64(0));
+}
+
+void TestGerberFormat::viewAndStringDecodeAgree()
+{
+    // The parser decodes from views into the statement text (no copy); the
+    // QString versions are what every other test pins. Both must give the
+    // same value for every token, including the odd ones: signs, empty,
+    // too long for the format, and too long for a 64-bit integer (decodes
+    // as 0). Each view is cut from the middle of a longer statement, as
+    // the parser cuts it, so a decoder reading past the view's end would
+    // see the "Y1D01" after it.
+    const QStringList tokens = {"021363", "-021363", "+5", "0", "", "1234567890123", "99999999999999999999"};
+    for (const bool leadingZeroOmitted : {true, false}) {
+        for (const bool inches : {true, false}) {
+            GerberFormat format;
+            format.integerDigits = 2;
+            format.decimalDigits = 4;
+            format.leadingZeroOmitted = leadingZeroOmitted;
+            format.unitsAreInches = inches;
+            for (const QString &token : tokens) {
+                const QString statement = QLatin1Char('X') + token + QLatin1String("Y1D01");
+                const QStringView view = QStringView(statement).mid(1, token.size());
+                const QByteArray where = (token + (leadingZeroOmitted ? " L" : " T") + (inches ? " inch" : " mm"))
+                                             .toUtf8();
+                QVERIFY2(format.decodeCoordinateMm(view) == format.decodeCoordinateMm(token), where.constData());
+                QVERIFY2(format.decodeCoordinateNm(view) == format.decodeCoordinateNm(token), where.constData());
+            }
+        }
+    }
 }
 
 QTEST_MAIN(TestGerberFormat)

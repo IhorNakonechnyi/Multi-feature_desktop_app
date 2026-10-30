@@ -15,15 +15,20 @@ struct DecodedDigits {
     bool negative;
 };
 
-DecodedDigits extractDigits(const QString &token, const GerberFormat &format)
+// Takes a view, not a QString: the parser calls this for every coordinate
+// of every statement, and a view into the statement text needs no copy.
+// QStringView::toLongLong reads exactly the view's characters (it does not
+// look for a terminating null), so a view cut from the middle of
+// "X021363Y1D01" decodes just "021363".
+DecodedDigits extractDigits(QStringView token, const GerberFormat &format)
 {
-    QString digits = token;
+    QStringView digits = token;
     bool negative = false;
     if (digits.startsWith(QLatin1Char('+'))) {
-        digits.remove(0, 1);
+        digits = digits.mid(1);
     } else if (digits.startsWith(QLatin1Char('-'))) {
         negative = true;
-        digits.remove(0, 1);
+        digits = digits.mid(1);
     }
 
     const int totalDigits = format.integerDigits + format.decimalDigits;
@@ -33,13 +38,16 @@ DecodedDigits extractDigits(const QString &token, const GerberFormat &format)
     // leading zeros were dropped - nothing to pad.
     // Trailing-zero omission ('T', rare/legacy): the digits given are the
     // left-justified head, so pad with trailing zeros up to the full
-    // width before placing the decimal point.
-    if (!format.leadingZeroOmitted && digits.length() < totalDigits) {
-        digits += QString(totalDigits - digits.length(), QLatin1Char('0'));
-    }
-
+    // width before placing the decimal point. Padding needs a real string,
+    // so this rare branch still builds one, exactly as before.
     bool ok = false;
-    const qint64 rawValue = digits.toLongLong(&ok);
+    qint64 rawValue = 0;
+    if (!format.leadingZeroOmitted && digits.length() < totalDigits) {
+        const QString padded = digits.toString() + QString(totalDigits - digits.length(), QLatin1Char('0'));
+        rawValue = padded.toLongLong(&ok);
+    } else {
+        rawValue = digits.toLongLong(&ok);
+    }
     return DecodedDigits{ok ? rawValue : 0, negative};
 }
 
@@ -73,7 +81,7 @@ qint64 roundedDivide(qint64 numerator, qint64 denominator)
 
 } // namespace
 
-double GerberFormat::decodeCoordinateMm(const QString &token) const
+double GerberFormat::decodeCoordinateMm(QStringView token) const
 {
     const DecodedDigits decoded = extractDigits(token, *this);
 
@@ -85,7 +93,7 @@ double GerberFormat::decodeCoordinateMm(const QString &token) const
     return unitsAreInches ? value * 25.4 : value;
 }
 
-qint64 GerberFormat::decodeCoordinateNm(const QString &token) const
+qint64 GerberFormat::decodeCoordinateNm(QStringView token) const
 {
     const DecodedDigits decoded = extractDigits(token, *this);
 
@@ -109,6 +117,18 @@ qint64 GerberFormat::decodeCoordinateNm(const QString &token) const
     const qint64 scaled = roundedDivide(decoded.rawValue * nmPerFileUnit, pow10(decimalDigits));
 
     return decoded.negative ? -scaled : scaled;
+}
+
+// The QString versions stay for callers that already hold a whole token
+// (the drill parser, the tests); a QString converts to a view for free.
+double GerberFormat::decodeCoordinateMm(const QString &token) const
+{
+    return decodeCoordinateMm(QStringView(token));
+}
+
+qint64 GerberFormat::decodeCoordinateNm(const QString &token) const
+{
+    return decodeCoordinateNm(QStringView(token));
 }
 
 qint64 GerberFormat::mmToNm(double mm)

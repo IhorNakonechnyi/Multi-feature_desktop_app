@@ -527,7 +527,7 @@ void applyCoordinateToken(const QString &token, const GerberFormat &format, QPoi
         // and an unreadable number decodes as 0 - a region corner then
         // jumped to X=0 and twisted the outline.
         const int end = nextUppercaseIndex(token, xIndex + 1);
-        point.setX(format.decodeCoordinateMm(token.mid(xIndex + 1, end - xIndex - 1)));
+        point.setX(format.decodeCoordinateMm(QStringView(token).mid(xIndex + 1, end - xIndex - 1)));
     }
     if (yIndex >= 0) {
         // Bounded by the next field letter after Y (e.g. the 'I' that
@@ -538,7 +538,7 @@ void applyCoordinateToken(const QString &token, const GerberFormat &format, QPoi
         // (I/J center offsets) do, and without this bound the Y decode
         // would silently swallow "I...J..." text into itself.
         const int end = nextUppercaseIndex(token, yIndex + 1);
-        point.setY(format.decodeCoordinateMm(token.mid(yIndex + 1, end - yIndex - 1)));
+        point.setY(format.decodeCoordinateMm(QStringView(token).mid(yIndex + 1, end - yIndex - 1)));
     }
 }
 
@@ -594,11 +594,13 @@ std::optional<QPointF> arcCenter(const ParserState &state, const QString &coordi
     QPointF centerOffset(0.0, 0.0);
     if (iIndex >= 0) {
         const int end = nextUppercaseIndex(coordinatePart, iIndex + 1);
-        centerOffset.setX(state.format.decodeCoordinateMm(coordinatePart.mid(iIndex + 1, end - iIndex - 1)));
+        centerOffset.setX(
+            state.format.decodeCoordinateMm(QStringView(coordinatePart).mid(iIndex + 1, end - iIndex - 1)));
     }
     if (jIndex >= 0) {
         const int end = nextUppercaseIndex(coordinatePart, jIndex + 1);
-        centerOffset.setY(state.format.decodeCoordinateMm(coordinatePart.mid(jIndex + 1, end - jIndex - 1)));
+        centerOffset.setY(
+            state.format.decodeCoordinateMm(QStringView(coordinatePart).mid(jIndex + 1, end - jIndex - 1)));
     }
     if (state.singleQuadrantArcs) {
         const std::optional<QPointF> resolved =
