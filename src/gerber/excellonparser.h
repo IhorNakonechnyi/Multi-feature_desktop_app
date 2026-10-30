@@ -66,4 +66,13 @@ Layer parseContentToObjects(const QString &content);
 std::optional<QStringList> nonGeometryLines(const QString &content, SameDataRefusal *refusal = nullptr,
                                             bool *drawLeftOut = nullptr);
 
+// The drill counterpart of GerberParser::sameStatementsApartFromNoise: true
+// when the two files give the parser the same input. Line N is paired with
+// line N (trimmed, empty lines skipped, as the parser reads them); each pair
+// must be equal, or both must be volatile comments (ExportNoise::
+// isVolatileComment) without "FILE_FORMAT=" - the one thing the parser reads
+// from a comment. False means only "not provable this way"; also false when
+// either file contains U+FFFD. Stops at the first pair that differs.
+bool sameLinesApartFromNoise(const QString &contentA, const QString &contentB);
+
 } // namespace ExcellonParser

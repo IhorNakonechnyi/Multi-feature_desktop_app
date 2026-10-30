@@ -4,7 +4,9 @@
 #include "archivecompare/comparisonsummary.h"
 #include "archivecompare/samedatacheck.h"
 #include "archivecompare/samedatadiagnosis.h"
+#include "gerber/excellonparser.h"
 #include "gerber/exportnoise.h"
+#include "gerber/gerberobjectdump.h"
 #include "gerber/gerberparser.h"
 #include "gerber/layerequivalence.h"
 
@@ -179,6 +181,26 @@ private slots:
     void drillAbsoluteInputSwitchStillSeesAMovedHole();
     void drillIncrementalInputIsNeverSameData();
     void redefinedDrillToolIsNeverSameData();
+
+    // Fast path: same statements apart from noise the parser ignores
+    // (GerberParser::sameStatementsApartFromNoise,
+    // ExcellonParser::sameLinesApartFromNoise)
+    void noiseOnlyDifferencesAreSameByStatements();
+    void volatileAttributeDifferenceIsSameByStatements();
+    void objectLabelDifferenceIsSameByStatements();
+    void windowsLineEndingsAreSameByStatements();
+    void differentNoiseKindsAtOnePositionAreNotSame();
+    void changedCoordinateIsNotSameByStatements();
+    void extraCommentLineIsNotSameByStatements();
+    void changedFileFunctionIsNotSameByStatements();
+    void cutOffFilesAreNeverSameByStatements();
+    void replacementCharacterFallsBack();
+    void sameTextWithDifferentOriginIsNotSame();
+    void noiseStatementsDoNotChangeTheParsedObjects();
+    void drillNoiseCommentDifferenceIsSameByLines();
+    void drillOrdinaryCommentDifferenceIsNotSame();
+    void drillNoiseCommentWithFileFormatIsNotSame();
+    void drillMovedHoleIsNotSameByLines();
 
     // Pair collapse and summary
     void sameDataPairTurnsBothFilesGreen();
@@ -1381,6 +1403,152 @@ void TestSameDataCheck::diagnosisPassesForEmptyLayers()
 {
     QCOMPARE(SameDataDiagnosis::explain(gerber(kExportA, ""), gerber(kExportB, "")),
              QString("Same-data check: all steps pass - same data (both layers draw nothing)"));
+}
+
+// --- Fast path -------------------------------------------------------------
+//
+// The fast path may say "same" only when the two files give the parser the
+// same input: every statement equal, or both noise of one kind that the parse
+// loop ignores whatever it says. Anything else must be "not same here" (the
+// full check then decides) - so most cases below assert false.
+
+namespace {
+
+bool sameByStatements(const QByteArray &a, const QByteArray &b)
+{
+    return GerberParser::sameStatementsApartFromNoise(QString::fromUtf8(a), QString::fromUtf8(b));
+}
+
+bool sameByLines(const QByteArray &a, const QByteArray &b)
+{
+    return ExcellonParser::sameLinesApartFromNoise(QString::fromUtf8(a), QString::fromUtf8(b));
+}
+
+} // namespace
+
+void TestSameDataCheck::noiseOnlyDifferencesAreSameByStatements()
+{
+    QVERIFY(sameByStatements(gerber(kExportA), gerber(kExportB)));
+}
+
+void TestSameDataCheck::volatileAttributeDifferenceIsSameByStatements()
+{
+    QVERIFY(sameByStatements(gerber("%TF.CreationDate,2026-10-01*%\n"), gerber("%TF.CreationDate,2026-10-20*%\n")));
+    QVERIFY(sameByStatements(gerber("%TF.SameCoordinates,{1111}*%\n"), gerber("%TF.SameCoordinates,{2222}*%\n")));
+}
+
+void TestSameDataCheck::objectLabelDifferenceIsSameByStatements()
+{
+    const QString bodyA = "D10*\n%TO.C,R12*%\nX1000000Y1000000D03*\n%TD*%\n";
+    const QString bodyB = "D10*\n%TO.C,R15*%\nX1000000Y1000000D03*\n%TD.C*%\n";
+    QVERIFY(sameByStatements(gerber(kExportA, bodyA), gerber(kExportB, bodyB)));
+    QVERIFY(sameByStatements(gerber("%LNfirst*%\n%INjob1*%\n"), gerber("%LNsecond*%\n%INjob2*%\n")));
+}
+
+void TestSameDataCheck::windowsLineEndingsAreSameByStatements()
+{
+    const QByteArray unix = gerber(kExportA);
+    QByteArray windows = unix;
+    windows.replace("\n", "\r\n");
+    QVERIFY(sameByStatements(unix, windows));
+}
+
+void TestSameDataCheck::differentNoiseKindsAtOnePositionAreNotSame()
+{
+    // Each side's statement alone is noise, but not of the same kind.
+    QVERIFY(!sameByStatements(gerber("G04 note*\n"), gerber("%TF.CreationDate,2026-10-20*%\n")));
+    QVERIFY(!sameByStatements(gerber("%TF.CreationDate,2026-10-20*%\n"), gerber("%TF.ProjectId,board*%\n")));
+    QVERIFY(!sameByStatements(gerber("%TO.C,R1*%\n"), gerber("%TD*%\n")));
+}
+
+void TestSameDataCheck::changedCoordinateIsNotSameByStatements()
+{
+    const QString body = "D10*\nX%1Y1000000D03*\n";
+    QVERIFY(!sameByStatements(gerber(kExportA, body.arg("1000000")), gerber(kExportB, body.arg("1000001"))));
+}
+
+void TestSameDataCheck::extraCommentLineIsNotSameByStatements()
+{
+    // Comments are noise, but one more of them shifts every later statement
+    // out of its pair - the fast path does not look for that.
+    QVERIFY(!sameByStatements(gerber(kExportA), gerber(kExportB + "G04 one more*\n")));
+}
+
+void TestSameDataCheck::changedFileFunctionIsNotSameByStatements()
+{
+    // .FileFunction says which layer this is: not noise.
+    QVERIFY(!sameByStatements(gerber("%TF.FileFunction,Copper,L1,Top*%\n"),
+                              gerber("%TF.FileFunction,Copper,L2,Bot*%\n")));
+}
+
+void TestSameDataCheck::cutOffFilesAreNeverSameByStatements()
+{
+    // The splitter drops a cut-off tail unread, so two different tails would
+    // look alike - and so would two equal ones that nobody read.
+    QVERIFY(!sameByStatements(gerber(kExportA) + "%FSLAX", gerber(kExportB) + "%FSLAY"));
+    QVERIFY(!sameByStatements(gerber(kExportA) + "%FSLAX", gerber(kExportA) + "%FSLAX"));
+    QVERIFY(!sameByStatements(gerber(kExportA) + "X1Y1D01", gerber(kExportA) + "X1Y1D01"));
+}
+
+void TestSameDataCheck::replacementCharacterFallsBack()
+{
+    // Two different invalid bytes both decode to U+FFFD, so the texts would
+    // be equal although the files are not.
+    QByteArray a = gerber(kExportA);
+    QByteArray b = gerber(kExportA);
+    a.replace("M02*", "X1\xFFY2D01*\nM02*");
+    b.replace("M02*", "X1\xFEY2D01*\nM02*");
+    QVERIFY(QString::fromUtf8(a) == QString::fromUtf8(b)); // the trap is real
+    QVERIFY(!sameByStatements(a, b));
+}
+
+void TestSameDataCheck::sameTextWithDifferentOriginIsNotSame()
+{
+    // "MOMM" inside %...% sets the unit; as a plain command the parser reads
+    // it differently. Equal text is not enough - the origin must match too.
+    const QByteArray a = gerber(kExportA);
+    QByteArray b = a;
+    b.replace("%MOMM*%", "MOMM*");
+    QVERIFY(!sameByStatements(a, b));
+}
+
+void TestSameDataCheck::noiseStatementsDoNotChangeTheParsedObjects()
+{
+    // Pins the fast path's premise on the parser itself: noise statements
+    // with different text produce exactly the same objects.
+    const QString bodyA = "D10*\n%TO.C,R12*%\nX1000000Y1000000D03*\n%TD*%\nG04 a*\nX2000000Y1000000D03*\n";
+    const QString bodyB = "D10*\n%TO.C,R15*%\nX1000000Y1000000D03*\n%TD.C*%\nG04 b*\nX2000000Y1000000D03*\n";
+    const QByteArray a = gerber(kExportA + "%TF.CreationDate,2026-10-01*%\n%LNfirst*%\n", bodyA);
+    const QByteArray b = gerber(kExportB + "%TF.CreationDate,2026-10-20*%\n%LNsecond*%\n", bodyB);
+    QVERIFY(sameByStatements(a, b));
+    const Layer layerA = GerberParser::parseContentToObjects(QString::fromUtf8(a));
+    const Layer layerB = GerberParser::parseContentToObjects(QString::fromUtf8(b));
+    QCOMPARE(layerA.objects.size(), 2);
+    QCOMPARE(GerberObjectDump::dump(layerA), GerberObjectDump::dump(layerB));
+}
+
+void TestSameDataCheck::drillNoiseCommentDifferenceIsSameByLines()
+{
+    QVERIFY(sameByLines(drill(kDrillExportA), drill(kDrillExportB)));
+}
+
+void TestSameDataCheck::drillOrdinaryCommentDifferenceIsNotSame()
+{
+    // A drill comment can carry meaning; only the known noise words are noise.
+    QVERIFY(!sameByLines(drill(";updated pads\n"), drill(";other pads\n")));
+}
+
+void TestSameDataCheck::drillNoiseCommentWithFileFormatIsNotSame()
+{
+    // The drill parser reads FILE_FORMAT= from any comment, noise or not.
+    QVERIFY(ExportNoise::isVolatileComment("date: 1 FILE_FORMAT=3:3")); // the trap is real
+    QVERIFY(!sameByLines(drill(";date: 1 FILE_FORMAT=3:3\n"), drill(";date: 2 FILE_FORMAT=2:4\n")));
+}
+
+void TestSameDataCheck::drillMovedHoleIsNotSameByLines()
+{
+    QVERIFY(!sameByLines(drill(kDrillExportA, "T01C0.300\n", "X1.500Y2.250\n"),
+                         drill(kDrillExportB, "T01C0.300\n", "X1.600Y2.250\n")));
 }
 
 QTEST_MAIN(TestSameDataCheck)

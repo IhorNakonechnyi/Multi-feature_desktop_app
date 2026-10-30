@@ -764,14 +764,18 @@ Layer parseContentToObjectsInternal(const QString &content, double &outUnitScale
             continue;
         }
         if (statement.isParameterStatement) {
-            continue; // anything else not yet handled - ignored, not fatal
+            // Anything else not yet handled - ignored, not fatal. The
+            // same-data fast path relies on this for %TF/%TO/%TD/%LN/%IN
+            // (noiseKind): reading one of them here means updating it.
+            continue;
         }
         if (text.startsWith(QLatin1String("G04"))) {
             // G04 is RS-274X's dedicated comment code - the rest of the
             // statement is free-form human text (e.g. "G04 END OF APERTURE
             // DEFINITIONS*") and must never be parsed as coordinates/D-codes,
             // even though ordinary comment text routinely contains uppercase
-            // X/Y/D characters. Always a pure no-op, regardless of content.
+            // X/Y/D characters. Always a pure no-op, regardless of content -
+            // which the same-data fast path relies on (noiseKind).
             continue;
         }
         if (text.startsWith(QLatin1String("G36"))) {
@@ -1308,6 +1312,37 @@ bool isDoNothingTransform(const QString &text)
     return false;
 }
 
+// For the fast path (sameStatementsApartFromNoise): which kind of noise a
+// statement is, or an empty view if it is not noise. Noise here means a
+// statement the parse loop ignores WHATEVER its text says, so two of one
+// kind can differ without changing the parse:
+// - a plain G04: the loop's G04 branch skips it. tryParseDirective, which
+//   runs first, reads only %FS, %MO, G70 and G71, so it never matches one;
+// - a %TF volatile attribute, %TO, %TD, %LN, %IN: '%' statements the loop
+//   drops in its "anything else" branch. They all start with a letter, so
+//   isMacroBodyStatement ends a macro body at them in both files alike.
+// These are also exactly what nonGeometryStatements leaves out as noise, so
+// the fast path trusts nothing the full check does not. The kind of a
+// volatile attribute is its name (".CreationDate" is not ".ProjectId"), of
+// the others their two letters.
+// If the parse loop ever starts reading one of these, it must leave this list.
+QStringView noiseKind(const StatementView &statement)
+{
+    const QStringView text = statement.text;
+    if (!statement.isParameterStatement) {
+        return text.startsWith(QLatin1String("G04")) ? text.first(3) : QStringView();
+    }
+    if (text.startsWith(QLatin1String("TO")) || text.startsWith(QLatin1String("TD"))
+        || text.startsWith(QLatin1String("LN")) || text.startsWith(QLatin1String("IN"))) {
+        return text.first(2);
+    }
+    if (text.startsWith(QLatin1String("TF")) && ExportNoise::isVolatileAttribute(text.toString())) {
+        const qsizetype comma = text.indexOf(QLatin1Char(','));
+        return comma < 0 ? text : text.first(comma);
+    }
+    return QStringView();
+}
+
 } // namespace
 
 Layer GerberParser::parseContentToObjects(const QString &content)
@@ -1599,6 +1634,36 @@ std::optional<QStringList> GerberParser::nonGeometryStatements(const QString &co
         *drawLeftOut = walk.drawLeftOut;
     }
     return kept;
+}
+
+bool GerberParser::sameStatementsApartFromNoise(const QString &contentA, const QString &contentB)
+{
+    // fromUtf8 turns every invalid byte into U+FFFD, so two files with
+    // different bad bytes in the same place decode to equal text.
+    const QChar replacement(QChar::ReplacementCharacter);
+    if (contentA.contains(replacement) || contentB.contains(replacement)) {
+        return false;
+    }
+    StatementCursor cursorA(contentA);
+    StatementCursor cursorB(contentB);
+    StatementView a;
+    StatementView b;
+    for (;;) {
+        const bool hasA = cursorA.next(a);
+        const bool hasB = cursorB.next(b);
+        if (!hasA || !hasB) {
+            // Both must end together, and neither may have dropped a cut-off
+            // tail: that tail was never compared.
+            return !hasA && !hasB && !cursorA.truncated() && !cursorB.truncated();
+        }
+        if (a.isParameterStatement == b.isParameterStatement && a.text == b.text) {
+            continue;
+        }
+        const QStringView kind = noiseKind(a);
+        if (kind.isEmpty() || kind != noiseKind(b)) {
+            return false;
+        }
+    }
 }
 
 QPainterPath GerberParser::parseFile(const QString &filePath)

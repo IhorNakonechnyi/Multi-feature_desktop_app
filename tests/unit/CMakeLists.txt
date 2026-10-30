@@ -169,6 +169,7 @@ add_executable(test_samedatacheck
     ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatacheck.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/samedatadiagnosis.cpp
     ${CMAKE_SOURCE_DIR}/src/archivecompare/comparisonsummary.cpp
+    ${CMAKE_SOURCE_DIR}/src/gerber/gerberobjectdump.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/layerequivalence.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberfiletype.cpp
     ${CMAKE_SOURCE_DIR}/src/gerber/gerberparser.cpp
