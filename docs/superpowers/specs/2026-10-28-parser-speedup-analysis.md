@@ -2,7 +2,7 @@
 
 **Status**: **Decided 2026-10-30; being implemented** on branch `multi-threading` per
 [the plan](../plans/2026-10-30-same-data-check-speedup.md) - the fast path is live from
-Task 5. Rewritten 2026-10-30 after a second analysis round. Context:
+Task 5; real-data results in §7. Rewritten 2026-10-30 after a second analysis round. Context:
 [idea_multi-threading.md](idea_multi-threading.md),
 [2026-10-26-stage-timing-diagnostic-design.md](2026-10-26-stage-timing-diagnostic-design.md).
 
@@ -79,6 +79,9 @@ if the settings match — the **full parse** of both, then the **shape compariso
 | One pass per file (settings list + shapes in one walk) | Gain smaller than it looks: the strict checks must still run per line. Real-change pairs get slower (shapes always built). Mixes the safety rules into the parser that also draws the overlay. |
 | Keep parsed shapes per file (cache by CRC) | Each file is in one pair only, so a compare repeats nothing. Memory ~15–20 MB per MB of file (Case 2: ~250–340 MB vs 87 MB peak today). Click is already ≤215 ms. |
 | Per-file fingerprint (SHA-256) for parsing on drop | Only useful for threading on drop; the fast path removes most of that work. Revisit with Stage 3 if it happens. |
+| Fast path that skips noise instead of pairing it by position | Real data (§7): it would have caught **0** of the 15 missed greens. Would also need a safety rule for a comment between a macro and the next block. |
+| Fast path that also drops presence-only defaults (`%TF.FilePolarity,Positive`, `%IPPOS`) | Would catch all 8 Case-3 misses (newer export adds `.SameCoordinates` + `.FilePolarity`), but Case 3 costs only ~100 ms in all. |
+| Fast path that maps renumbered apertures / differently written sizes | Case 2's misses (incl. the 41k-statement file) stop at an `%ADD`; proving a renumbering consistent is the parsing check's job, and a second implementation of it is a risk to the main rule. |
 
 ## 4. Safety net
 
@@ -89,7 +92,7 @@ if the settings match — the **full parse** of both, then the **shape compariso
    files, stored, must stay identical) and a result fingerprint in the timing build (a
    checksum over all check output; reveals nothing; baseline recorded before the first fix).
 
-## 5. Proposed order (to be decided)
+## 5. Order (decided 2026-10-30; progress in the plan's "Where we are")
 
 | # | Step | Risk |
 |---|---|---|
@@ -109,7 +112,38 @@ fix on this PC; separate zips per fix only if the real-data fingerprint changes.
   per-stage split; `parsebench.exe <seconds> settings|shapes` loops one pass for profiling.
 - Profiling: `VSDiagnostics.exe` (CpuUsageHigh config, no admin), then
   `xperf -i <etl> -symbols -a profile -detail` with `_NT_SYMBOL_PATH` at the benchmark PDBs.
-- Timing zips in `build-dist/`: `…-timing-iconfix-…`, `…-timing-parsesplit-…`.
+- Timing zips in `build-dist/`: `…-timing-iconfix-…`, `…-timing-parsesplit-…`,
+  `…-timing-baseline-…` (fingerprint, before any parser change), `…-timing-fastpath-…`,
+  `…-timing-missreasons-…` (current).
+- Throwaway checks (gitignored): `build-fpharness/` (calls the check with `PCB_TIMING`),
+  `build-fastpathfuzz/` (40,000 random edits: fast path "same" ⇒ identical parser output;
+  0 violations).
+
+## 7. Real-data checkpoints (2026-10-30, work PC, unplugged)
+
+Unplugged runs are ~1.7× slower than the earlier plugged-in ones; compare only runs made in the
+same power state. "Normal build" = the timing build's own estimate without its extra work.
+
+**Safety.** `Result fingerprint` identical between the baseline zip and both later zips in all
+4 cases: the cursor (Task 3) and the fast path (Tasks 4–6) changed no answer of the parsing
+check. Case 1 has 3 disagreements, all decision A and checked by Igor: 2 drill files that were
+false yellows, 1 empty contour file.
+
+| | greens | fast-path hits | missed | check, before | check, normal build now |
+|---|---|---|---|---|---|
+| Case 1 | 15 → 18 | 16 | 2 | ~744 ms | **~141 ms** |
+| Case 2 | 15 | 10 | 5 | ~4,845 ms | ~4,872 ms |
+| Case 3 | 8 | 0 | 8 | ~106 ms | ~100 ms |
+| Case 4 | 0 | 0 | 0 | ~1,229 ms | ~1,234 ms |
+
+**Why the fast path missed** (value-free readout, `FastPathMiss`): Case 1 — reordered or split
+geometry mid-file; Case 2 — an `%ADD` right at the top (renumbered apertures or sizes written
+differently), including the big 41k-statement file; Case 3 — a newer export adds
+`%TF.SameCoordinates` and `%TF.FilePolarity,Positive`. None would match with noise dropped.
+
+**Conclusion.** The fast path solves plain re-saves (Case 1) but not the slow cases: Case 2
+(~5 s unplugged) and Case 4 (~1.2 s) need the parser. Next: Fixes A–C, re-measure, then
+threading if Case 2 still freezes (its floor is the slowest pair, 3.4 s unplugged today).
 
 ## Sources
 

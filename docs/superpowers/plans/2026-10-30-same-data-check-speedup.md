@@ -10,6 +10,37 @@
 
 **Spec:** [docs/superpowers/specs/2026-10-28-parser-speedup-analysis.md](../specs/2026-10-28-parser-speedup-analysis.md) (decisions of 2026-10-30 inside).
 
+## Where we are (2026-10-30, end of session)
+
+**Next: Task 7 (Fix A).** Tasks 1–6 are done; an extra step between 6 and 7 added the
+"why the fast path missed" readout. Real-data results and the decision to go on with
+Fixes A–C: spec §7.
+
+| Task | State | Commit |
+|---|---|---|
+| 1 Golden test | ✅ done | `f965187` |
+| 2 Result fingerprint + baseline zip | ✅ done | `83f81d4` |
+| 3 Statement cursor | ✅ done | `581e79c` |
+| 4 Fast-path functions | ✅ done | `38a8d6a` |
+| 5 Fast path wired in | ✅ done | `006c274` |
+| 6 Fast-path counters | ✅ done | `015cd74` |
+| 6½ Why-missed readout + estimate fix (not in the original plan) | ✅ done | `18f04b0` |
+| — Real-data checkpoints 1 and 2 (Igor, unplugged) | ✅ done: fingerprints identical; spec §7 | — |
+| 7 Fix A | ⏭ **next** | |
+| 8 Fix B | to do | |
+| 9 Fix C + final zip | to do | |
+
+How to resume:
+- Working mode agreed with Igor: one task at a time; after each, build + all tests +
+  self-review (up to 3 review/fix rounds), then a short report.
+- The ledger with every ruling made so far: `.superpowers/sdd/2026-10-30-same-data-check-speedup/progress.md`
+  (gitignored). Start the next task with the executing-plans `task-start` script.
+- Task 9's final zip is compared against `build-dist/…-timing-missreasons-win64.zip` (or the
+  baseline zip): the fingerprint per case must stay `fd7f569b1305373e`, `fe23dd71de3af1e5`,
+  `e9ed283c4a4ecd92`, `62770098066bbd94`. **Igor runs it unplugged**, like the checkpoints.
+- After Task 9: re-measure; if Case 2 still freezes, Stage 3 (threading). Parked for Case 4:
+  the side-by-side early exit (spec §3).
+
 ## Global Constraints
 
 - Branch `multi-threading`; commit there only, never on `main`.
@@ -31,7 +62,7 @@
 
 ---
 
-### Task 1: Golden test for both parsers
+### Task 1: Golden test for both parsers — ✅ done
 
 Protects every later parser change: today's exact output on a fixed made-up corpus, stored as SHA-256 per file. (SHA-256 is used here because we compare against results from the *past*; storing a 64-character fingerprint instead of megabytes of expected output.)
 
@@ -51,7 +82,7 @@ Protects every later parser change: today's exact output on a fixed made-up corp
 - [ ] **Step 5: Prove it bites.** Temporarily change `pow10` to start at `result = 2`, rebuild, expect FAIL, revert.
 - [ ] **Step 6: Commit** `Add a golden test that pins both parsers' output`.
 
-### Task 2: Result fingerprint in the timing build
+### Task 2: Result fingerprint in the timing build — ✅ done
 
 Proves on real files that later changes give the same answers. Reveals nothing about the files.
 
@@ -69,7 +100,7 @@ Proves on real files that later changes give the same answers. Reveals nothing a
 - [ ] **Step 3: Commit** `Add a result fingerprint to the timing readout`.
 - [ ] **Step 4: Build the baseline zip** `build-dist/PcbSupplierWorkflow-1.8.9-timing-baseline-win64.zip` with the `docs/releasing.md` recipe. Igor does not run it yet; it is run together with Task 9's zip.
 
-### Task 3: Statement cursor under `tokenize`
+### Task 3: Statement cursor under `tokenize` — ✅ done
 
 One splitter that produces statements as views (no copies, can stop early). `tokenize` is rebuilt on it, so the parser and the fast path can never disagree on where a statement starts and ends.
 
@@ -84,7 +115,7 @@ One splitter that produces statements as views (no copies, can stop early). `tok
 - [ ] **Step 2: Run all tests** → `test_parsergolden` PASS unchanged; `test_gerberparser`, `test_samedatacheck` PASS.
 - [ ] **Step 3: Commit** `Split Gerber statements with a cursor that yields views`.
 
-### Task 4: Fast-path functions in both parsers
+### Task 4: Fast-path functions in both parsers — ✅ done
 
 **Files:**
 - Modify: `src/gerber/gerberparser.h`, `src/gerber/gerberparser.cpp`
@@ -118,7 +149,7 @@ Rules (Gerber): walk both cursors together; stop with `false` at the first pair 
 - [ ] **Step 4: Run all tests** → PASS.
 - [ ] **Step 5: Commit** `Add the same-data fast path: same statements apart from noise`.
 
-### Task 5: Wire the fast path into the check
+### Task 5: Wire the fast path into the check — ✅ done
 
 **Files:**
 - Modify: `src/archivecompare/samedatacheck.h`, `src/archivecompare/samedatacheck.cpp:32-117`
@@ -140,7 +171,7 @@ Rules (Gerber): walk both cursors together; stop with `false` at the first pair 
 - [ ] **Step 4: Run all tests** → PASS.
 - [ ] **Step 5: Commit** `Use the fast path first in the same-data check`.
 
-### Task 6: Fast-path counters in the timing build
+### Task 6: Fast-path counters in the timing build — ✅ done
 
 **Files:**
 - Modify: `src/archivecompare/stagetiming.h` (`CheckStages`: `qint64 fastNs`, `int fastHits`, `qint64 slowOnHitsNs`, `int disagreements`, `int greensMissed`), `src/archivecompare/stagetiming.cpp` (one line + dash list)
@@ -154,7 +185,7 @@ Rules (Gerber): walk both cursors together; stop with `false` at the first pair 
 - [ ] **Step 2: Timing build, run on a made-up re-saved pair** → hits 1, disagreements 0; on a `G91` noise-only pair → disagreements 1.
 - [ ] **Step 3: Commit** `Count the fast path's hits and disagreements in the timing readout`.
 
-### Task 7: Fix A — fewer, cheaper pattern runs
+### Task 7: Fix A — fewer, cheaper pattern runs — ⏭ next
 
 **Files:**
 - Modify: `src/gerber/gerberparser.cpp:1072` (`classifyPlain`) and the three `match` calls in it
